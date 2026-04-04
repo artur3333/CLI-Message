@@ -1,0 +1,116 @@
+LoginScreen {
+    align: center middle;
+}
+
+#login-container {
+    width: 50%;
+    height: auto;
+    border: double cyan;
+    padding: 1 2;
+    background: $panel;
+}
+
+#login-title {
+    text-align: center;
+    color: cyan;
+    text-style: bold;
+    margin-bottom: 1;
+}
+
+#login-error {
+    color: red;
+    text-align: center;
+}
+
+.field-label {
+    color: $text-muted;
+    margin-top: 1;
+}
+
+#login-buttons {
+    margin-top: 2;
+    height: auto;
+}
+
+#login-buttons Button {
+    width: 1fr;
+    margin-right: 1;
+}
+
+MainScreen {
+    layout: horizontal;
+}
+
+#servers-container {
+    width: 8;
+    background: $panel-darken-2;
+    padding: 1 1;
+    border-right: solid $primary-darken-3;
+    align: center top;
+}
+
+.server-icon {
+    width: 5;
+    height: 3;
+    border: solid $primary-darken-1;
+    content-align: center middle;
+    margin-bottom: 1;
+    text-align: center;
+}
+
+#channels-container {
+    width: 22;
+    background: $panel-darken-1;
+    border-right: solid $primary-darken-3;
+    layout: vertical;
+}
+
+#channels-list {
+    height: 1fr;
+}
+
+#user-info {
+    height: 3;
+    background: $panel-darken-2;
+    padding: 1;
+    content-align: left middle;
+}
+
+#username-label {
+    text-style: bold;
+}
+
+#channels-title {
+    text-style: bold;
+    color: $text-muted;
+    text-align: center;
+    padding: 1;
+}
+
+#chat-container {
+    width: 1fr;
+    layout: vertical;
+}
+
+#messages-container {
+    height: 1fr;
+    padding: 1 2;
+}
+
+#message-input {
+    margin: 0 1 1 1;
+    height: 3;
+}
+
+#members-container {
+    width: 20;
+    background: $panel-darken-1;
+    border-left: solid $primary-darken-3;
+}
+
+#members-title {
+    text-style: bold;
+    color: $text-muted;
+    text-align: center;
+    padding: 1;
+}
