@@ -37,6 +37,9 @@ LoginScreen {
     margin-right: 1;
 }
 
+
+
+
 MainScreen {
     layout: horizontal;
 }
@@ -47,26 +50,127 @@ MainScreen {
     padding: 1 1;
     border-right: solid $primary-darken-3;
     align: center top;
+    layout: vertical;
 }
 
-.server-icon {
+.server-button {
     width: 5;
     height: 3;
-    border: solid $primary-darken-1;
+    min-width: 5;
+    border: round $primary-darken-1;
     content-align: center middle;
     margin-bottom: 1;
     text-align: center;
+    background: transparent;
 }
 
+.server-button:hover {
+    background: transparent;
+    border: round $primary;
+}
+
+.active-server {
+    border: round cyan;
+    color: cyan;
+    background: transparent;
+    text-style: bold;
+}
+
+.server-add-button {
+    width: 5;
+    height: 3;
+    min-width: 5;
+    border: dashed $primary-darken-1;
+    content-align: center middle;
+    margin-bottom: 1;
+    text-align: center;
+    background: transparent;
+    color: $text-muted;
+}
+
+.server-add-button:hover {
+    border: dashed cyan;
+    color: cyan;
+}
+
+
+
 #channels-container {
-    width: 22;
+    width: 24;
     background: $panel-darken-1;
     border-right: solid $primary-darken-3;
     layout: vertical;
 }
 
+#server-title {
+    height: 4;
+    padding: 0 1;
+    background: $panel-darken-1;
+    border-bottom: solid $primary-darken-3;
+    align: left middle;
+}
+
+#server-name {
+    height: 100%;
+    width: 1fr;
+    text-style: bold;
+    color: cyan;
+    content-align: left middle;
+    text-overflow: ellipsis;
+}
+
+.invite-button {
+    width: auto;
+    height: 3;
+    min-width: 10;
+    border: blank;
+    background: transparent;
+    color: $text-muted;
+    content-align: center middle;
+}
+
+.invite-button:hover {
+    color: cyan;
+}
+
 #channels-list {
     height: 1fr;
+}
+
+.channel-button {
+    width: 100%;
+    height: 3;
+    border: none;
+    background:transparent;
+    padding: 0 1;
+    color: $text-muted;
+    content-align: left middle;
+    text-align: left;
+}
+
+.channel-button:hover {
+    background: $panel;
+    color: $text;
+}
+
+.active-channel {
+    background: $panel;
+    color: $text;
+    text-style: bold;
+}
+
+.add-channel-button {
+    width: 100%;
+    height: 3;
+    border: blank;
+    background: transparent;
+    padding: 0 2;
+    color: $text-muted;
+    text-align: center;
+}
+
+.add-channel-button:hover {
+    color: cyan;
 }
 
 #user-info {
@@ -87,9 +191,22 @@ MainScreen {
     padding: 1;
 }
 
+
+
 #chat-container {
     width: 1fr;
     layout: vertical;
+}
+
+#chat-title {
+    width: 100%;
+    height: 4;
+    padding: 0 2;
+    border-bottom: solid $primary-darken-3;
+    background: $panel-darken-1;
+    content-align: left middle;
+    color: $text;
+    text-style: bold;
 }
 
 #messages-container {
@@ -97,20 +214,117 @@ MainScreen {
     padding: 1 2;
 }
 
+.chat-placeholder {
+    color: $text-muted;
+    text-align: center;
+    margin-top: 2;
+}
+
+.channel-start-placeholder {
+    color: $text-muted;
+    padding-bottom: 1;
+    margin-bottom: 1;
+    border-bottom: solid $primary-darken-3;
+}
+
 #message-input {
     margin: 0 1 1 1;
     height: 3;
 }
 
+
+
 #members-container {
     width: 20;
     background: $panel-darken-1;
     border-left: solid $primary-darken-3;
+    layout: vertical;
 }
 
 #members-title {
+    width: 100%;
+    height: 4;
     text-style: bold;
     color: $text-muted;
+    content-align: center middle;
+    border-bottom: solid $primary-darken-3;
+}
+
+#members-list {
+    height: 1fr;
+}
+
+.member-item {
+    height: 2;
+    padding: 0 1;
+    color: $text-muted;
+    content-align: left middle;
+}
+
+.member-item:hover {
+    color: $text;
+}
+
+
+
+
+ServerOptionsScreen, CreateServerScreen, JoinServerScreen, InviteCodePopup, CreateChannelScreen {
+    align: center middle;
+}
+
+#screen-container {
+    width: 60;
+    height: auto;
+    border: double cyan;
+    padding: 1 2;
+    background: $panel;
+}
+
+#screen-title {
     text-align: center;
-    padding: 1;
+    color: cyan;
+    text-style: bold;
+    margin-bottom: 1;
+}
+
+#screen-error {
+    color: red;
+    text-align: center;
+}
+
+.screen-subtitle {
+    color: $text-muted;
+    text-align: center;
+    margin-bottom: 1;
+}
+
+.field-label {
+    color: $text-muted;
+    margin-top: 1;
+}
+
+#screen-buttons {
+    margin-top: 1;
+    height: auto;
+}
+
+#screen-buttons Button {
+    width: 1fr;
+    height: auto;
+}
+
+#cancel-button {
+    background: $panel-darken-1;
+}
+
+#invite-code-label {
+    text-align: center;
+    color: cyan;
+    text-style: bold;
+    margin: 1 0;
+}
+
+ServerOptionsScreen #screen-container Button {
+    width: 100%;
+    margin-bottom: 1;
 }

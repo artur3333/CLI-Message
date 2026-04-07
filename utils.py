@@ -55,3 +55,6 @@ def verify_password(password, hashed_password, salt):
 
 def generate_token():
     return secrets.token_hex(32)
+
+def generate_invite_code():
+    return secrets.token_urlsafe(8)
