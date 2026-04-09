@@ -227,9 +227,82 @@ MainScreen {
     border-bottom: solid $primary-darken-3;
 }
 
-#message-input {
-    margin: 0 1 1 1;
+#input-row {
     height: 3;
+    margin: 0 1 1 1;
+}
+
+#message-input {
+    width: 1fr;
+    height: 3;
+}
+
+#attach-button {
+    width: 5;
+    height: 3;
+    min-width: 5;
+    border: round $primary-darken-1;
+    background: transparent;
+    color: $text-muted;
+    content-align: center middle;
+}
+
+#attach-button:hover {
+    border: round cyan;
+    color: cyan;
+}
+
+.message {
+    width: 100%;
+    height: auto;
+    padding: 0 0 1 0;
+    margin-bottom: 0;
+    background: transparent;
+}
+
+.message:hover {
+    background: $panel;
+}
+
+.attachment-card {
+    height: 3;
+    width: auto;
+    max-width: 100;
+    margin-top: 1;
+    padding: 0 1;
+    border: round $primary-darken-2;
+    background: transparent;
+    align: left middle;
+    padding-left: 1;
+}
+
+.attachment-card:hover {
+    border: round $primary;
+}
+
+.attachment-label {
+    color: $text;
+    content-align: left middle;
+    width: auto;
+    max-width: 80;
+    text-overflow: ellipsis;
+}
+
+.download-button {
+    width: 3;
+    height: 1;
+    min-width: 3;
+    margin-left: 1;
+    background: transparent;
+    color: $text-muted;
+    content-align: center middle;
+    border: none;
+}
+
+.download-button:hover {
+    border: none;
+    color: cyan;
+    background: transparent;
 }
 
 
@@ -254,21 +327,21 @@ MainScreen {
     height: 1fr;
 }
 
-.member-item {
+.member-label {
     height: 2;
     padding: 0 1;
     color: $text-muted;
     content-align: left middle;
 }
 
-.member-item:hover {
+.member-label:hover {
     color: $text;
 }
 
 
 
 
-ServerOptionsScreen, CreateServerScreen, JoinServerScreen, InviteCodePopup, CreateChannelScreen {
+ServerOptionsScreen, CreateServerScreen, JoinServerScreen, InviteCodePopup, CreateChannelScreen, Attachment, DownloadScreen {
     align: center middle;
 }
 

@@ -75,8 +75,10 @@ def init_db():
                    "channel_id INTEGER NOT NULL, " \
                    "sender_id INTEGER NOT NULL, " \
                    "content TEXT NOT NULL, " \
+                   "attachment_data BLOB DEFAULT NULL, " \
+                   "attachment_name TEXT DEFAULT NULL, " \
                    "created INTEGER NOT NULL, " \
-                   "deleted INTEGER DEFAULT 0)")
+                   "deleted INTEGER DEFAULT 0)") #? I think it's better to limit the file size of attachments
     
     connection.commit()
     connection.close()
@@ -366,3 +368,53 @@ def join_server(user_id, server_id):
     except Exception as e:
         connection.close()
         return False, f"Error: {str(e)}"
+    
+
+def send_message(channel_id, sender_id, content, attachment_data=None, attachment_name=None):
+    connection = connect_db()
+    cursor = connection.cursor()
+
+    try:
+        cursor.execute("INSERT INTO messages (channel_id, sender_id, content, attachment_data, attachment_name, created) VALUES (?, ?, ?, ?, ?, ?)",
+                       (channel_id, sender_id, content, attachment_data, attachment_name, timestamp()))
+        message_id = cursor.lastrowid
+        connection.commit()
+        connection.close()
+
+        return True, message_id
+    
+    except Exception as e:
+        connection.close()
+        return False, f"Error: {str(e)}"
+    
+
+def get_channel_messages(channel_id, limit=100):
+    connection = connect_db()
+    cursor = connection.cursor()
+
+    cursor.execute("SELECT messages.*, users.username, users.display_name FROM messages JOIN users ON messages.sender_id = users.id WHERE messages.channel_id = ? AND messages.deleted = 0 ORDER BY messages.created DESC LIMIT ?",
+                   (channel_id, limit))
+    
+    results = []
+    for row in cursor.fetchall():
+        results.append(dict(row))
+    connection.close()
+
+    results.reverse()
+
+    return results
+
+
+def get_messages_after(channel_id, last_id):
+    connection = connect_db()
+    cursor = connection.cursor()
+    
+    cursor.execute("SELECT messages.*, users.username, users.display_name FROM messages JOIN users ON messages.sender_id = users.id WHERE messages.channel_id = ? AND messages.id > ? AND messages.deleted = 0 ORDER BY messages.created ASC",
+                    (channel_id, last_id))
+    
+    results = []
+    for row in cursor.fetchall():
+        results.append(dict(row))
+    connection.close()
+
+    return results

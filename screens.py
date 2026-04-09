@@ -1,10 +1,14 @@
+import os
+
 from textual.app import ComposeResult
 from textual.screen import Screen
 from textual.widgets import Input, Button, Static, Label
+from textual.widget import Widget
 from textual.containers import Horizontal, Container, ScrollableContainer
 
 import auth
 import db
+from utils import format_timestamp
 
 
 class LoginScreen(Screen):
@@ -54,6 +58,8 @@ class MainScreen(Screen):
         super().__init__()
         self.active_server = None
         self.active_channel = None
+        self.last_message_id = 0
+        self.pending_attachment = None
 
     def compose(self) -> ComposeResult:
 
@@ -76,7 +82,9 @@ class MainScreen(Screen):
             with ScrollableContainer(id="messages-container"):
                 yield Static("Select a channel to start chatting", id="chat-placeholder", classes="chat-placeholder")
             
-            yield Input(placeholder="Type a message...", id="message-input", disabled=True)
+            with Horizontal(id="input-row"):
+                yield Button("+", id="attach-button", disabled=True)
+                yield Input(placeholder="Type a message...", id="message-input", disabled=True)
 
         with Container(id="members-container"):
             yield Label("Members", id="members-title")
@@ -88,6 +96,22 @@ class MainScreen(Screen):
         user = auth.get_current_user()
         self.query_one("#username-label", Label).update(f"@{user['username']}")
         await self.load_servers()
+        self.set_interval(5, self.refresh_messages)
+
+
+    async def refresh_messages(self):
+        if not self.active_channel:
+            return
+        
+        messages = db.get_messages_after(self.active_channel["id"], self.last_message_id)
+        if not messages:
+            return
+
+        for message in messages:
+            await self.query_one("#messages-container").mount(Message(message))
+            self.last_message_id = message["id"]
+
+        self.query_one("#messages-container").scroll_end(animate=False)
 
 
     async def load_servers(self):
@@ -140,19 +164,39 @@ class MainScreen(Screen):
                 name = member["username"]
             await members_list.mount(Label(name, classes="member-label"))
 
+
+    async def load_messages(self, channel_id):
+        messages = db.get_channel_messages(channel_id)
+        messages_container = self.query_one("#messages-container")
+        await messages_container.remove_children()
+
+        channel = self.active_channel
+        await messages_container.mount(Static(f"This is the beginning of # {channel["name"]}", classes="channel-start-placeholder"))
+
+        for message in messages:
+            await messages_container.mount(Message(message))
+
+        if messages:
+            self.last_message_id = messages[-1]["id"]
+        else:
+            self.last_message_id = 0
+
+        messages_container.scroll_end(animate=False)
+
     
     async def switch_server(self, server_id): #! Check thisssssssssssss!!!!
         server = db.get_server_by_id(server_id)
         
         self.active_server = server
         self.active_channel = None
+        self.last_message_id = 0
 
         self.query_one("#server-name", Label).update(server["name"])
 
         header = self.query_one("#server-title")
         for button in header.query(".invite-button"):
             await button.remove()
-        
+
         await header.mount(Button("Invite", id=f"invite-button", classes="invite-button"))
 
         for button in self.query(".server-button"):
@@ -167,7 +211,10 @@ class MainScreen(Screen):
         messages = self.query_one("#messages-container")
         await messages.remove_children()
         await messages.mount(Static("Select a channel to chat", classes="chat-placeholder"))
+        
         self.query_one("#message-input", Input).disabled = True
+        self.query_one("#attach-button", Button).disabled = True
+        self.pending_attachment = None
     
 
     async def switch_channel(self, channel_id):
@@ -186,10 +233,48 @@ class MainScreen(Screen):
         self.query_one(f"#channel-{channel_id}", Button).add_class("active-channel")
         
         self.query_one("#message-input", Input).disabled = False
+        self.query_one("#attach-button", Button).disabled = False
+        self.pending_attachment = None
 
-        messages = self.query_one("#messages-container")
-        await messages.remove_children()
-        await messages.mount(Static(f"This is the beginning of # {channel['name']}", classes="channel-start-placeholder"))
+        await self.load_messages(channel_id)
+
+
+    async def send_message(self, content, attachment_path=None):
+        if not self.active_channel:
+            return
+        
+        user = auth.get_current_user()
+        
+        attachment_data = None
+        attachment_name = None
+        if attachment_path:
+            try:
+                with open(attachment_path, "rb") as file:
+                    attachment_data = file.read()
+
+                attachment_name = os.path.basename(attachment_path)
+            
+            except Exception as e:
+                pass
+
+        success, result = db.send_message(self.active_channel["id"], user["id"], content, attachment_data=attachment_data, attachment_name=attachment_name)
+        if not success:
+            return
+        
+        messages = db.get_messages_after(self.active_channel["id"], self.last_message_id)
+        for message in messages:
+            await self.query_one("#messages-container").mount(Message(message))
+            self.last_message_id = message["id"]
+
+        self.query_one("#messages-container").scroll_end(animate=False)
+
+        self.pending_attachment = None
+        
+        if self.pending_attachment:
+            filename = os.path.basename(self.pending_attachment)
+            self.query_one("#message-input", Input).placeholder = f"[Attached: {filename}] Type a message..."
+        else:
+            self.query_one("#message-input", Input).placeholder = "Type a message..."
 
 
     async def on_button_pressed(self, event: Button.Pressed):
@@ -198,15 +283,15 @@ class MainScreen(Screen):
         if button_id == "add-server-button":
             def option(choice):
                 if choice == "create":
-                    self.app.push_screen(CreateServerScreen()) #!
+                    self.app.push_screen(CreateServerScreen(), self.server_created)
 
                 elif choice == "join":
-                    self.app.push_screen(JoinServerScreen()) #!
+                    self.app.push_screen(JoinServerScreen(), self.server_joined)
 
             self.app.push_screen(ServerOptionsScreen(), option)
 
         elif button_id.startswith("server-"):
-            server_id = button_id.split("-")[1]
+            server_id = button_id.split("-", 1)[1]
             await self.switch_server(server_id)
 
         elif button_id == "invite-button":
@@ -215,11 +300,209 @@ class MainScreen(Screen):
 
         elif button_id == "add-channel-button":
             if self.active_server:
-                self.app.push_screen(CreateChannelScreen(self.active_server["id"])) #!
+                self.app.push_screen(CreateChannelScreen(self.active_server["id"]), self.channel_created)
 
         elif button_id.startswith("channel-"):
-            channel_id = button_id.split("-")[1]
+            channel_id = button_id.split("-", 1)[1]
             await self.switch_channel(channel_id)
+
+        elif button_id == "attach-button":
+            self.app.push_screen(Attachment(), self.attachment_selected)
+
+        elif button_id.startswith("download-"):
+            message_single = event.button.parent.parent
+
+            if isinstance(message_single, Message):
+                data = message_single.message.get("attachment_data")
+                filename = message_single.message.get("attachment_name")
+                
+                self.app.push_screen(DownloadScreen(filename, data))
+    
+
+    
+    async def on_input_submitted(self, event: Input.Submitted):
+        if event.input.id == "message-input":
+            content = event.value.strip()
+            event.input.value = ""
+
+            if not content and not self.pending_attachment:
+                return
+            
+            if not content and self.pending_attachment:
+                content = os.path.basename(self.pending_attachment)
+
+            await self.send_message(content, attachment_path=self.pending_attachment)
+
+        else:
+            return
+
+
+    
+    async def server_created(self, server_id):
+        if not server_id:
+            return
+        
+        await self.load_servers()
+        await self.switch_server(server_id)
+
+    async def server_joined(self, server_id):
+        if not server_id:
+            return
+        
+        await self.load_servers()
+        await self.switch_server(server_id)
+
+    async def channel_created(self, channel_id):
+        if not channel_id:
+            return
+
+        if self.active_server:
+            await self.load_channels(self.active_server["id"])
+            await self.switch_channel(channel_id)
+
+    async def attachment_selected(self, path):
+        if not path:
+            return
+        
+        self.pending_attachment = path
+        if self.pending_attachment:
+            filename = os.path.basename(self.pending_attachment)
+            self.query_one("#message-input", Input).placeholder = f"[Attached: {filename}] Type a message..."
+        else:
+            self.query_one("#message-input", Input).placeholder = "Type a message..."
+
+
+class Message(Widget):
+    def __init__(self, message):
+        super().__init__()
+        self.message = message
+        self.add_class("message")
+
+    def compose(self) -> ComposeResult:
+        if self.message.get("display_name"):
+            name = self.message["display_name"]
+        else:
+            name = self.message["username"]
+
+        time = format_timestamp(self.message["created"])
+
+        text = f"[b]{name}[/b] [dim][{time}][/dim]\n{self.message['content']}"
+        
+        yield Static(text, markup=True, classes="message-content")
+
+        if self.message.get("attachment_name"):
+            filename = os.path.basename(self.message["attachment_name"])
+            extension = os.path.splitext(filename)[1].lower()
+            if extension in [".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp"]:
+                sub = "Image Attachment"
+            else:
+                sub = "Attachment"
+
+            with Horizontal(classes="attachment-card"):
+                yield Static(f"{sub} [bold]{filename}[/bold]", markup=True, classes="attachment-label")
+                yield Button("↓", id=f"download-{self.message['id']}", classes="download-button")
+
+
+    '''
+    def __init__(self, message):
+        if message.get("display_name"):
+            name = message["display_name"]
+        else:
+            name = message["username"]
+
+        time = format_timestamp(message["created"])
+
+        text = f"[b]{name}[/b] [dim][{time}][/dim]\n{message['content']}"
+        
+        if message.get("attachment_path"):
+            filename =  os.path.basename(message["attachment_path"])
+            extension = os.path.splitext(filename)[1].lower()
+
+            if extension in [".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp"]:
+                text += f"\n[Image Attachment: {filename}]"
+            else:
+                text += f"\n[Attachment: {filename}]"
+
+        super().__init__(text, markup=True)
+        self.add_class("message")
+    '''
+
+
+class Attachment(Screen):
+    def compose(self) -> ComposeResult:
+        with Container(id="screen-container"):
+            yield Label("Attachment", id="screen-title")
+            yield Label("", id="screen-error")
+            yield Label("File Path", classes="field-label")
+            yield Input(placeholder="File path...", id="file-path-input")
+            with Horizontal(id="screen-buttons"):
+                yield Button("Attach", id="attach-confirm-button", variant="primary")
+                yield Button("Cancel", id="cancel-button")
+
+    def on_button_pressed(self, event: Button.Pressed):
+        if event.button.id == "attach-confirm-button":
+            path = self.query_one("#file-path-input", Input).value.strip()
+            error = self.query_one("#screen-error", Label)
+
+            if not path:
+                error.update("File path cannot be empty.")
+                return
+            
+            if not os.path.isfile(path):
+                error.update("File not found. Check the path.")
+                return
+            
+            self.dismiss(path)
+
+        else:
+            self.dismiss()
+
+
+class DownloadScreen(Screen):
+    def __init__(self, filename, data):
+        super().__init__()
+        self.filename = filename
+        self.data = data
+
+    def compose(self) -> ComposeResult:
+        with Container(id="screen-container"):
+            yield Label("Download Attachment", id="screen-title")
+            yield Label("", id="screen-error")
+            yield Label(f"File: {self.filename}", classes="screen-subtitle")
+            yield Label("Destination Path", classes="field-label")
+            yield Input(value=os.path.expanduser("~/Downloads"), id="destination-input")
+            with Horizontal(id="screen-buttons"):
+                yield Button("Download", id="download-button", variant="primary")
+                yield Button("Cancel", id="cancel-button")
+
+    def on_button_pressed(self, event: Button.Pressed):
+        if event.button.id == "download-button":
+            destination = self.query_one("#destination-input", Input).value.strip()
+            error = self.query_one("#screen-error", Label)
+
+            if not destination:
+                error.update("Destination path cannot be empty.")
+                return
+            
+            destination = os.path.expanduser(destination)
+            if not os.path.isdir(destination):
+                error.update("Destination folder not found.")
+                return
+            
+            destination_path = os.path.join(destination, self.filename)
+            
+            try:
+                with open(destination_path, "wb") as file:
+                    file.write(self.data)
+
+                self.dismiss(destination_path)
+            
+            except Exception as e:
+                error.update(f"Error: {str(e)}")
+
+        else:
+            self.dismiss()
+
 
 
 class ServerOptionsScreen(Screen):
