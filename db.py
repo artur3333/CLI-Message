@@ -78,7 +78,16 @@ def init_db():
                    "attachment_data BLOB DEFAULT NULL, " \
                    "attachment_name TEXT DEFAULT NULL, " \
                    "created INTEGER NOT NULL, " \
-                   "deleted INTEGER DEFAULT 0)") #? I think it's better to limit the file size of attachments
+                   "deleted INTEGER DEFAULT 0)")
+    
+    # friends
+    cursor.execute("CREATE TABLE IF NOT EXISTS friends (" \
+                   "id INTEGER PRIMARY KEY AUTOINCREMENT, " \
+                   "sender_id INTEGER NOT NULL, " \
+                   "receiver_id INTEGER NOT NULL, " \
+                   "status TEXT DEFAULT 'pending', " \
+                   "created INTEGER NOT NULL," \
+                   "UNIQUE(sender_id, receiver_id))")
     
     connection.commit()
     connection.close()
@@ -411,6 +420,118 @@ def get_messages_after(channel_id, last_id):
     
     cursor.execute("SELECT messages.*, users.username, users.display_name FROM messages JOIN users ON messages.sender_id = users.id WHERE messages.channel_id = ? AND messages.id > ? AND messages.deleted = 0 ORDER BY messages.created ASC",
                     (channel_id, last_id))
+    
+    results = []
+    for row in cursor.fetchall():
+        results.append(dict(row))
+    connection.close()
+
+    return results
+
+
+def send_friend_request(sender_id, receiver_id):
+    connection = connect_db()
+    cursor = connection.cursor()
+
+    if sender_id == receiver_id:
+        connection.close()
+        return False, "You cannot send a friend request to yourself."
+    
+    cursor.execute("SELECT * FROM friends WHERE status = 'accepted' AND ((sender_id =? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?))",
+                   (sender_id, receiver_id, receiver_id, sender_id))
+    
+    if cursor.fetchone() is not None:
+        connection.close()
+        return False, "You are already friends with this user."
+    
+    cursor.execute("SELECT * FROM friends WHERE status = 'pending' AND ((sender_id =? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?))",
+                   (sender_id, receiver_id, receiver_id, sender_id))
+    
+    if cursor.fetchone() is not None:
+        connection.close()
+        return False, "A friend request is already pending with this user."
+    
+    try:
+        cursor.execute("INSERT INTO friends (sender_id, receiver_id, status, created) VALUES (?, ?, ?, ?)",
+                       (sender_id, receiver_id, "pending", timestamp()))
+        connection.commit()
+        connection.close()
+
+        return True, "Friend request sent."
+    
+    except Exception as e:
+        connection.close()
+        return False, f"Error: {str(e)}"
+    
+
+def accept_friend_request(request_id): #or sender_id / receiver_id
+    connection = connect_db()
+    cursor = connection.cursor()
+
+    try:
+        cursor.execute("UPDATE friends SET status = 'accepted' WHERE id = ?",
+                       (request_id,))
+        connection.commit()
+        connection.close()
+
+        return True, "Friend request accepted."
+    
+    except Exception as e:
+        connection.close()
+        return False, f"Error: {str(e)}"
+    
+
+def decline_friend_request(request_id):
+    connection = connect_db()
+    cursor = connection.cursor()
+
+    try:
+        cursor.execute("DELETE FROM friends WHERE id = ?",
+                       (request_id,))
+        connection.commit()
+        connection.close()
+
+        return True, "Friend request declined."
+    
+    except Exception as e:
+        connection.close()
+        return False, f"Error: {str(e)}"
+    
+
+def get_pending_friend_requests(user_id):
+    connection = connect_db()
+    cursor = connection.cursor()
+
+    cursor.execute("SELECT friends.*, users.username, users.display_name FROM friends JOIN users ON friends.sender_id = users.id WHERE friends.receiver_id = ? AND friends.status = 'pending' ORDER BY friends.created ASC",
+                   (user_id,))
+    
+    results = []
+    for row in cursor.fetchall():
+        results.append(dict(row))
+    connection.close()
+
+    return results
+
+
+def are_friends(user_id1, user_id2):
+    connection = connect_db()
+    cursor = connection.cursor()
+
+    cursor.execute("SELECT * FROM friends WHERE status = 'accepted' AND ((sender_id =? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?))",
+                   (user_id1, user_id2, user_id2, user_id1))
+    
+    result = cursor.fetchone() is not None
+    connection.close()
+
+    return result
+
+
+def get_friends(user_id):
+    connection = connect_db()
+    cursor = connection.cursor()
+
+    cursor.execute("SELECT users.* FROM users JOIN friends ON ((friends.sender_id = users.id AND friends.receiver_id = ?) OR (friends.receiver_id = users.id AND friends.sender_id = ?)) WHERE friends.status = 'accepted' AND users.id != ? ORDER BY users.username ASC",
+                   (user_id, user_id, user_id))
     
     results = []
     for row in cursor.fetchall():
