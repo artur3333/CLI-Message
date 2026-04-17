@@ -1,4 +1,5 @@
 import os
+from datetime import datetime
 
 from textual.app import ComposeResult
 from textual.screen import Screen, ModalScreen
@@ -8,7 +9,7 @@ from textual.containers import Horizontal, Container, ScrollableContainer
 
 import auth
 import db
-from utils import format_timestamp
+from utils import format_timestamp, day_label, should_compact
 
 
 class LoginScreen(Screen):
@@ -62,6 +63,10 @@ class MainScreen(Screen):
         self.pending_attachment = None
         self.active_mode = "dm"
         self.dm_view = "friends"
+        self.active_dm_user = None
+
+        self.last_message_day = None
+        self.last_message_previous = None
 
     def compose(self) -> ComposeResult:
 
@@ -119,16 +124,38 @@ class MainScreen(Screen):
         if self.active_server:
             await self.load_members(self.active_server["id"])
 
-        if not self.active_channel:
-            return
+        if self.active_mode == "dm":
+            if not self.active_dm_user:
+                return
+            user = auth.get_current_user()
+            messages = db.get_dm_messages_after(user["id"], self.active_dm_user["id"], self.last_message_id)
         
-        messages = db.get_messages_after(self.active_channel["id"], self.last_message_id)
+        elif self.active_mode == "server":
+            if not self.active_channel:
+                return
+            messages = db.get_messages_after(self.active_channel["id"], self.last_message_id)
+        
         if not messages:
             return
+        
+        prev = self.last_message_previous
+        prev_day = self.last_message_day
 
         for message in messages:
-            await self.query_one("#messages-container").mount(Message(message))
-            self.last_message_id = message["id"]
+            message_day = datetime.fromtimestamp(message["created"]).date()
+            if prev_day is None or message_day != prev_day:
+                await self.query_one("#messages-container").mount(DaySeparator(day_label(message["created"])))
+                prev_day = message_day
+                prev = None
+
+            compact = should_compact(prev, message)
+            await self.query_one("#messages-container").mount(Message(message, compact=compact))
+            prev = message
+            
+        self.last_message_previous = prev
+        self.last_message_day = prev_day
+
+        self.last_message_id = messages[-1]["id"]    
 
         self.query_one("#messages-container").scroll_end(animate=False)
 
@@ -201,13 +228,69 @@ class MainScreen(Screen):
         channel = self.active_channel
         await messages_container.mount(Static(f"This is the beginning of # {channel["name"]}", classes="channel-start-placeholder"))
 
+        prev = self.last_message_previous
+        prev_day = self.last_message_day
+
         for message in messages:
-            await messages_container.mount(Message(message))
+            message_day = datetime.fromtimestamp(message["created"]).date()
+            if prev_day is None or message_day != prev_day:
+                await self.query_one("#messages-container").mount(DaySeparator(day_label(message["created"])))
+                prev_day = message_day
+                prev = None
+
+            compact = should_compact(prev, message)
+            await self.query_one("#messages-container").mount(Message(message, compact=compact))
+            prev = message
 
         if messages:
             self.last_message_id = messages[-1]["id"]
+            self.last_message_previous = messages[-1]
+            self.last_message_day = datetime.fromtimestamp(messages[-1]["created"]).date()
+        
         else:
             self.last_message_id = 0
+            self.last_message_previous = None
+            self.last_message_day = None
+
+        messages_container.scroll_end(animate=False)
+
+        
+    async def load_dm_messages(self, user_id):
+        current_user = auth.get_current_user()
+        messages = db.get_dm_messages(current_user["id"], user_id)
+        messages_container = self.query_one("#messages-container")
+        await messages_container.remove_children()
+
+        if self.active_dm_user.get("display_name"):
+            name = self.active_dm_user["display_name"]
+        else:
+            name = self.active_dm_user["username"]
+
+        await messages_container.mount(Static(f"This is the beginning of your direct messages with @{name}", classes="channel-start-placeholder"))
+
+        prev = self.last_message_previous
+        prev_day = self.last_message_day
+
+        for message in messages:
+            message_day = datetime.fromtimestamp(message["created"]).date()
+            if prev_day is None or message_day != prev_day:
+                await self.query_one("#messages-container").mount(DaySeparator(day_label(message["created"])))
+                prev_day = message_day
+                prev = None
+
+            compact = should_compact(prev, message)
+            await self.query_one("#messages-container").mount(Message(message, compact=compact))
+            prev = message
+
+        if messages:
+            self.last_message_id = messages[-1]["id"]
+            self.last_message_previous = messages[-1]
+            self.last_message_day = datetime.fromtimestamp(messages[-1]["created"]).date()
+        
+        else:
+            self.last_message_id = 0
+            self.last_message_previous = None
+            self.last_message_day = None
 
         messages_container.scroll_end(animate=False)
 
@@ -219,6 +302,9 @@ class MainScreen(Screen):
         self.pending_attachment = None
         self.active_mode = "dm"
         self.dm_view = "friends"
+        self.active_dm_user = None
+        self.last_message_day = None
+        self.last_message_previous = None
 
         await self.load_servers()
 
@@ -237,33 +323,11 @@ class MainScreen(Screen):
         self.query_one("#dm-tab-friends", Button).add_class("active-dm-tab")
         self.query_one("#dm-tab-pending", Button).remove_class("active-dm-tab")
 
-        # self.query_one("#message-input", Input).disabled = True
-        # self.query_one("#attach-button", Button).disabled = True
-
         await self.query_one("#members-list").remove_children()
         await self.load_dm_friends_view()
 
 
-    async def load_dm_friends_view(self):
-        self.dm_view = "friends"
-        self.query_one("#input-row").display = False
-
-        user = auth.get_current_user()
-        friends = db.get_friends(user["id"])
-
-        container = self.query_one("#messages-container")
-        await container.remove_children()
-
-        if not friends:
-            await container.mount(Static("No friends yet...", classes="chat-placeholder"))
-            return
-        
-        await container.mount(Static(f"[bold]All Friends ({len(friends)})[/bold]", markup=True, classes="dm-section-header"))
-        
-        for friend in friends:
-            await container.mount(FriendCard(friend))
-
-    async def load_dm_sidebar(self): #move in switch_dm_mode, maybe?
+    async def load_dm_sidebar(self):
         user = auth.get_current_user()
         friends = db.get_friends(user["id"])
         pending = db.get_pending_friend_requests(user["id"])
@@ -281,14 +345,41 @@ class MainScreen(Screen):
                 else:
                     name = friend["username"]
 
-                await channels_list.mount(Button(name, id=f"dm-{friend['id']}", classes="channel-button"))
+                if self.active_dm_user and self.active_dm_user["id"] == friend["id"]:
+                    button_classes = "channel-button active-channel"
+                else:
+                    button_classes = "channel-button"
+
+                await channels_list.mount(Button(name, id=f"dm-{friend['id']}", classes=button_classes))
         
         else:
             await channels_list.mount(Static("No friends yet...", classes="channel-placeholder"))
 
+    async def load_dm_friends_view(self):
+        self.dm_view = "friends"
+        self.query_one("#input-row").display = False
+        self.query_one("#members-container").display = False
+
+        user = auth.get_current_user()
+        friends = db.get_friends(user["id"])
+
+        container = self.query_one("#messages-container")
+        await container.remove_children()
+
+        if not friends:
+            await container.mount(Static("No friends yet...", classes="chat-placeholder"))
+            return
+        
+        await container.mount(Static(f"[bold]All Friends ({len(friends)})[/bold]", markup=True, classes="dm-section-header"))
+        
+        for friend in friends:
+            await container.mount(FriendCard(friend))
+
     async def load_dm_pending_view(self):
         self.dm_view = "pending"
         self.query_one("#input-row").display = False
+        self.query_one("#members-container").display = False
+
         user = auth.get_current_user()
         pending = db.get_pending_friend_requests(user["id"])
         
@@ -304,6 +395,43 @@ class MainScreen(Screen):
         for request in pending:
             await container.mount(FriendRequestCard(request))
 
+    async def open_dm(self, user_id):
+        friend = db.get_user_by_id(user_id)
+        if not friend:
+            return
+        
+        if friend["display_name"]:
+            name = friend["display_name"]
+        else:
+            name = friend["username"]
+        
+        self.active_dm_user = friend
+        self.last_message_id = 0
+        self.last_message_day = None
+        self.last_message_previous = None
+
+        for button in self.query(".channel-button"):
+            button.remove_class("active-channel")
+        
+        self.query_one(f"#dm-{user_id}", Button).add_class("active-channel")
+
+        self.query_one("#dm-navbar").display = False
+        self.query_one("#chat-title").display = True
+        self.query_one("#input-row").display = True
+        self.query_one("#members-container").display = True
+
+        self.query_one("#chat-title", Label).update(f" @{name}")
+        self.query_one("#message-input", Input).disabled = False
+        self.query_one("#attach-button", Button).disabled = False
+        self.query_one("#message-input", Input).placeholder = f"Message @{name}..."
+        
+        self.query_one("#members-title", Label).update("")
+        await self.query_one("#members-list").remove_children()
+        
+        await self.query_one("#members-list").mount(DMUserPanel(friend))
+
+        await self.load_dm_messages(friend["id"])
+
     
     async def switch_server(self, server_id): #! Check thisssssssssssss!!!!
         server = db.get_server_by_id(server_id)
@@ -313,12 +441,16 @@ class MainScreen(Screen):
         self.active_mode = "server"
         self.dm_view = "friends"
         self.pending_attachment = None
+        self.active_dm_user = None
+        self.last_message_day = None
+        self.last_message_previous = None
 
         
         self.query_one("#chat-title").display = True
         self.query_one("#dm-navbar").display = False
         self.query_one("#input-row").display = True
         self.query_one("#members-container").display = True
+        self.query_one("#members-title", Label).update("Members")
 
         self.query_one("#server-name", Label).update(server["name"])
 
@@ -363,13 +495,17 @@ class MainScreen(Screen):
         
         self.query_one("#message-input", Input).disabled = False
         self.query_one("#attach-button", Button).disabled = False
+        self.query_one("#message-input", Input).placeholder = f"Message # {channel['name']}..."
         self.pending_attachment = None
 
         await self.load_messages(channel_id)
 
 
     async def send_message(self, content, attachment_path=None):
-        if not self.active_channel:
+        if self.active_mode == "server" and not self.active_channel:
+            return
+        
+        if self.active_mode == "dm" and not self.active_dm_user:
             return
         
         user = auth.get_current_user()
@@ -390,22 +526,53 @@ class MainScreen(Screen):
             except Exception as e:
                 pass
 
-        success, result = db.send_message(self.active_channel["id"], user["id"], content, attachment_data=attachment_data, attachment_name=attachment_name)
+        if self.active_mode == "dm":
+            if not self.active_dm_user:
+                return
+            
+            success, result = db.send_dm(user["id"], self.active_dm_user["id"], content, attachment_data=attachment_data, attachment_name=attachment_name)
+            if not success:
+                return
+            messages = db.get_dm_messages_after(user["id"], self.active_dm_user["id"], self.last_message_id)
+        
+        elif self.active_mode == "server":
+            if not self.active_channel:
+                return
+            
+            success, result = db.send_message(self.active_channel["id"], user["id"], content, attachment_data=attachment_data, attachment_name=attachment_name)
+            if not success:
+                return
+            messages = db.get_messages_after(self.active_channel["id"], self.last_message_id)
+
         if not success:
             return
         
-        messages = db.get_messages_after(self.active_channel["id"], self.last_message_id)
-        for message in messages:
-            await self.query_one("#messages-container").mount(Message(message))
-            self.last_message_id = message["id"]
+        prev = self.last_message_previous
+        prev_day = self.last_message_day
 
+        for message in messages:
+            message_day = datetime.fromtimestamp(message["created"]).date()
+            if prev_day is None or message_day != prev_day:
+                await self.query_one("#messages-container").mount(DaySeparator(day_label(message["created"])))
+                prev_day = message_day
+                prev = None
+
+            compact = should_compact(prev, message)
+            await self.query_one("#messages-container").mount(Message(message, compact=compact))
+            prev = message
+            
+        self.last_message_previous = prev
+        self.last_message_day = prev_day
+
+        self.last_message_id = messages[-1]["id"]
         self.query_one("#messages-container").scroll_end(animate=False)
 
         self.pending_attachment = None
-        
-        if self.pending_attachment:
-            filename = os.path.basename(self.pending_attachment)
-            self.query_one("#message-input", Input).placeholder = f"[Attached: {filename}] Type a message..."
+        self.query_one("#attach-button", Button).label = "+"
+
+        if self.active_mode == "dm" and self.active_dm_user: #! idk
+            self.query_one("#message-input", Input).placeholder = f"Message @{self.active_dm_user['username']}..."
+
         else:
             self.query_one("#message-input", Input).placeholder = "Type a message..."
 
@@ -440,7 +607,19 @@ class MainScreen(Screen):
             await self.switch_channel(channel_id)
 
         elif button_id == "attach-button":
-            self.app.push_screen(Attachment(), self.attachment_selected)
+            if self.pending_attachment:
+                self.pending_attachment = None
+                self.query_one("#attach-button", Button).label = "+"
+
+                if self.active_mode == "dm" and self.active_dm_user:
+                    self.query_one("#message-input", Input).placeholder = f"Message @{self.active_dm_user['username']}..."
+                elif self.active_channel:
+                    self.query_one("#message-input", Input).placeholder = f"Message # {self.active_channel['name']}..."
+                else:
+                    self.query_one("#message-input", Input).placeholder = "Type a message..."
+
+            else:
+                self.app.push_screen(Attachment(), self.attachment_selected)
 
         elif button_id.startswith("download-"):
             message_single = event.button.parent.parent
@@ -473,7 +652,8 @@ class MainScreen(Screen):
             self.app.push_screen(AddFriendScreen(), self.after_add_friend)
 
         elif button_id.startswith("dm-"):
-            pass
+            user_id = button_id.split("-", 1)[1]
+            await self.open_dm(user_id)
 
         elif button_id.startswith("accept-"):
             request = button_id.split("-", 1)[1]
@@ -498,6 +678,17 @@ class MainScreen(Screen):
             target = db.get_user_by_id(user_id)
             if target:
                 self.app.push_screen(UserProfileScreen(target)) #self.user_profile_closed
+
+        elif button_id.startswith("removefriend-"):
+            user_id = button_id.split("-", 1)[1]
+            current_user = auth.get_current_user()
+            success, result = db.remove_friend(current_user["id"], user_id)
+            if success:
+                self.notify("Friend removed.")
+                await self.switch_dm_mode()
+
+            else:
+                self.notify(result, title="Error")
 
         elif button_id == "logout-button":
             auth.logout()
@@ -549,11 +740,9 @@ class MainScreen(Screen):
             return
         
         self.pending_attachment = path
-        if self.pending_attachment:
-            filename = os.path.basename(self.pending_attachment)
-            self.query_one("#message-input", Input).placeholder = f"[Attached: {filename}] Type a message..."
-        else:
-            self.query_one("#message-input", Input).placeholder = "Type a message..."
+        filename = os.path.basename(self.pending_attachment)
+        self.query_one("#message-input", Input).placeholder = f"[Attached: {filename}] Type a message..."
+        self.query_one("#attach-button", Button).label = "X"
 
     # async def user_profile_closed(self, result):
     #     return
@@ -567,11 +756,24 @@ class MainScreen(Screen):
             return
 
 
+class DaySeparator(Widget):
+    def __init__(self, label):
+        super().__init__()
+        self.label = label
+        self.add_class("day-separator")
+
+    def compose(self) -> ComposeResult:
+        yield Static(self.label, classes="day-separator-label")
+
+
 class Message(Widget):
-    def __init__(self, message):
+    def __init__(self, message, compact=False):
         super().__init__()
         self.message = message
+        self.compact = compact
         self.add_class("message")
+        if self.compact:
+            self.add_class("compact-message")
 
     def compose(self) -> ComposeResult:
         if self.message.get("display_name"):
@@ -581,15 +783,17 @@ class Message(Widget):
 
         time = format_timestamp(self.message["created"])
 
-        text = f"[b]{name}[/b] [dim][{time}][/dim]\n{self.message['content']}"
+        if not self.compact:
+            head = f"[bold]{name}[/bold] [dim][{time}][/dim]"
+            yield Static(head, markup=True, classes="message-head")
         
-        yield Static(text, markup=True, classes="message-content")
+        yield Static(self.message["content"], markup=True, classes="message-content")
 
         if self.message.get("attachment_name"):
             filename = os.path.basename(self.message["attachment_name"])
             extension = os.path.splitext(filename)[1].lower()
             if extension in [".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp"]:
-                sub = "Image Attachment"
+                sub = "Image Attachment" #TODO: maybe show image preview?
             else:
                 sub = "Attachment"
 
@@ -686,29 +890,44 @@ class UserProfileScreen(ModalScreen):
         is_self = current_user["id"] == self.user["id"]
         if not is_self:
             already_friends = db.are_friends(current_user["id"], self.user["id"])
+            request_pending = db.is_friend_request_pending(current_user["id"], self.user["id"])
         else:
             already_friends = False
+            request_pending = False
 
         if self.user.get("display_name"):
             name = self.user["display_name"]
         else:
             name = self.user["username"]
+
+        member_since = datetime.fromtimestamp(self.user["created"]).strftime("%b %d, %Y")
             
         with Container(id="screen-container"):
-            yield Label("Profile", id="screen-title")
-            yield Label("", id="screen-error")
-            yield Label(f"[bold]{name}[/bold] [dim]@{self.user['username']}[/dim]", markup=True, id="profile-name-label")
+            with Horizontal(id="profile-top-row"):
+                yield Static("", classes="profile-top-row-separator")
+                yield Button("X", classes="profile-close-button")
+            yield Label("", id="screen-error", classes="hidden")
 
-            if self.user.get("bio"): #later add option to edit bio
-                yield Static(self.user["bio"], id="profile-bio-label")
+            yield Static(name[0].upper(), classes="profile-avatar")
+            yield Label(f"[bold]{name}[/bold]", markup=True, classes="profile-name-label")
+            yield Label(f"@{self.user['username']}", classes="profile-username-label")
+
+            if self.user.get("bio"): #TODO: later add option to edit bio
+                yield Static(self.user["bio"], classes="profile-bio-label")
+            else:
+                yield Static("[dim]No bio[/dim]", markup=True, classes="profile-bio-label")
+
+            yield Static(f"[dim]Member since {member_since}[/dim]", markup=True, classes="profile-member-since")
 
             if not is_self:
                 if already_friends:
                     yield Static("Already friends", id="profile-friend-status")
+                
+                elif request_pending:
+                    yield Static("Request pending", id="add-friend-profile-button", disabled=True)
+
                 else:
                     yield Button("+ Add Friend", id="add-friend-profile-button")
-                
-            yield Button("Close", id="cancel-button")
 
     def on_button_pressed(self, event: Button.Pressed):
         if event.button.id == "add-friend-profile-button":
@@ -720,6 +939,7 @@ class UserProfileScreen(ModalScreen):
                 event.button.label = "Request Sent"
 
             else:
+                error.remove_class("hidden")
                 error.update(result)
 
         else:
@@ -795,6 +1015,36 @@ class AddFriendScreen(ModalScreen):
 
         else:
             self.dismiss(False)
+
+
+class DMUserPanel(Widget):
+    def __init__(self, user):
+        super().__init__()
+        self.user = user
+        self.add_class("dm-user-panel")
+
+    def compose(self) -> ComposeResult:
+        if self.user.get("display_name"):
+            name = self.user["display_name"]
+        else:
+            name = self.user["username"]
+
+        yield Static(name[0].upper(), classes="dm-panel-avatar")
+        yield Static(f"[bold]{name}[/bold]", markup=True, classes="dm-panel-name")
+        yield Static(f"@{self.user['username']}", classes="dm-panel-username")
+
+        bio = self.user.get("bio", "")
+        if bio:
+            yield Static(bio, classes="dm-panel-bio")
+        else:
+            yield Static("[dim]No bio[/dim]", markup=True, classes="dm-panel-bio")
+
+        member_since = datetime.fromtimestamp(self.user["created"]).strftime("%b %d, %Y")
+        yield Static(f"[dim]Member since {member_since}[/dim]", markup=True, classes="dm-panel-member-since")
+
+        with Container(classes="dm-panel-buttons"):
+            yield Button("View Profile", id=f"member-{self.user['id']}", classes="dm-panel-profile-button")
+            yield Button("Remove Friend", id=f"removefriend-{self.user['id']}", classes="dm-panel-remove-button")
 
 
 

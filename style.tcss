@@ -258,6 +258,7 @@ MainScreen {
 }
 
 #input-row {
+    width: 1fr;
     height: 3;
     margin: 0 1 1 1;
 }
@@ -288,10 +289,26 @@ MainScreen {
     padding: 0 0 1 0;
     margin-bottom: 0;
     background: transparent;
+    padding-left: 1;
+    margin-top: 1;
 }
 
 .message:hover {
     background: $panel;
+}
+
+.compact-message {
+    margin-top: 0;
+}
+
+.message-header {
+    height: 1;
+    color: $text;
+}
+
+.message-content {
+    color: $text;
+    padding-left: 0;
 }
 
 .attachment-card {
@@ -303,7 +320,6 @@ MainScreen {
     border: round $primary-darken-2;
     background: transparent;
     align: left middle;
-    padding-left: 1;
 }
 
 .attachment-card:hover {
@@ -334,12 +350,27 @@ MainScreen {
     color: cyan;
     background: transparent;
 }
+
+.day-separator {
+    width: 100%;
+    height: 3;
+    align: center middle;
+    margin: 1 0;
+}
+
+.day-separator-label {
+    width: auto;
+    padding: 0 2;
+    color: $text-muted;
+    text-align: center;
+    border-top: solid $primary-darken-3;
+}
 /* --------------------------- */
 
 
 /* Members List */
 #members-container {
-    width: 20;
+    width: 24;
     background: $panel-darken-1;
     border-left: solid $primary-darken-3;
     layout: vertical;
@@ -598,27 +629,79 @@ ServerOptionsScreen #screen-container Button {
     text-align: center;
 }
 
+.hidden {
+    display: none;
+}
+
 
 UserProfileScreen {
     background: rgba(0, 0, 0, 0.2);
 }
 
-#profile-name-label {
-    text-style: bold;
+#profile-top-row {
+    width: 100%;
+    height: 3;
+    align: right middle;
+}
+
+.profile-top-row-separator {
+    width: 1fr;
+}
+
+.profile-close-button {
+    width: 5;
+    height: 3;
+    min-width: 5;
+    background: transparent;
+    border: round $primary-darken-1;
+    color: $text-muted;
+    content-align: center middle;
+}
+
+.profile-close-button:hover {
+    color: red;
+    background: transparent;
+    border: round red;
+}
+
+.profile-avatar {
+    width: 9;
+    height: 5;
+    border: round $primary-darken-1;
+    content-align: center middle;
     text-align: center;
+    text-style: bold;
+    color: cyan;
+}
+
+.profile-name-label {
+    text-style: bold;
+    text-align: left;
     color: $text;
-    margin-bottom: 1;
     padding: 1 0;
     width: 100%;
 }
 
-#profile-bio-label {
-    text-align: center;
+.profile-username-label {
+    width: 100%;
+    text-align: left;
     color: $text-muted;
-    margin: 1 0;
+    margin-bottom: 1;
 }
 
-#profile-friend-status {
+.profile-bio-label {
+    text-align: left;
+    color: $text-muted;
+    margin-bottom: 1;
+}
+
+.profile-member-since {
+    text-align: left;
+    color: $text-muted;
+    margin-bottom: 1;
+}
+
+.profile-friend-status {
     color: $success;
     text-align: center;
     margin-top: 1;
@@ -628,7 +711,89 @@ UserProfileScreen #screen-container {
     width: 46;
 }
 
-UserProfileScreen #screen-container Button {
+.dm-user-panel {
     width: 100%;
+    height: 100%;
+    padding: 1 1;
+    align: left top;
+}
+
+.dm-panel-avatar {
+    width: 9;
+    height: 5;
+    border: round $primary-darken-1;
+    content-align: center middle;
+    text-align: center;
+    text-style: bold;
+    color: cyan;
+}
+
+.dm-panel-name {
+    width: 100%;
+    text-align: left;
+    text-style: bold;
+    color: $text;
+}
+
+.dm-panel-username {
+    width: 100%;
+    text-align: left;
+    color: $text-muted;
+    margin-bottom: 1;
+    /* finish */
+}
+
+.dm-panel-bio {
+    width: 100%;
+    text-align: left;
+    color: $text-muted;
+    margin-bottom: 1;
+}
+
+#profile-member-since {
+    text-align: left;
+    color: $text-muted;
+    margin-bottom: 1;
+}
+
+.dm-panel-member-since {
+    width: 100%;
+    text-align: left;
+    color: $text-muted;
+    margin-bottom: 1;
+}
+
+.dm-panel-buttons {
+    width: 100%;
+    height: auto;
+    dock: bottom;
+    padding-bottom: 1;
+}
+
+.dm-panel-profile-button {
+    width: 100%;
+    height: 3;
+    border: round $primary-darken-1;
+    background: transparent;
+    color: cyan;
+    content-align: center middle;
+}
+
+.dm-panel-profile-button:hover {
+    border: round cyan;
+}
+
+.dm-panel-remove-button {
+    width: 100%;
+    height: 3;
+    border: round $error;
+    background: transparent;
+    color: $error;
+    content-align: center middle;
     margin-top: 1;
+}
+
+.dm-panel-remove-button:hover {
+    border: round $error;
+    color: $error-darken-2;
 }

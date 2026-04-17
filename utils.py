@@ -2,6 +2,7 @@ import time
 import secrets
 import hashlib
 import re
+from datetime import datetime
 
 
 def timestamp():
@@ -63,3 +64,33 @@ def generate_invite_code():
 
 def format_timestamp(timestamp):
     return time.strftime("%H:%M", time.localtime(timestamp))
+
+
+def day_label(timestamp):
+    datee = datetime.fromtimestamp(timestamp).date()
+    today = datetime.now().date()
+    delta = (today - datee).days
+
+    if delta == 0:
+        return "Today"
+    elif delta == 1:
+        return "Yesterday"
+    else:
+        return datetime.fromtimestamp(timestamp).strftime("%B %d, %Y")
+    
+
+def should_compact(previous_message, current_message):
+    if previous_message is None:
+        return False
+
+    if previous_message["sender_id"] != current_message["sender_id"]:
+        return False
+    
+    if not datetime.fromtimestamp(previous_message["created"]).date() == datetime.fromtimestamp(current_message["created"]).date():
+        return False
+
+    time_diff = current_message["created"] - previous_message["created"]
+    if time_diff > 300:  # 5 minutes
+        return False
+
+    return True

@@ -89,6 +89,17 @@ def init_db():
                    "created INTEGER NOT NULL," \
                    "UNIQUE(sender_id, receiver_id))")
     
+    # dm messages
+    cursor.execute("CREATE TABLE IF NOT EXISTS dm_messages (" \
+                   "id INTEGER PRIMARY KEY AUTOINCREMENT, " \
+                   "sender_id INTEGER NOT NULL, " \
+                   "receiver_id INTEGER NOT NULL, " \
+                   "content TEXT NOT NULL, " \
+                   "attachment_data BLOB DEFAULT NULL, " \
+                   "attachment_name TEXT DEFAULT NULL, " \
+                   "created INTEGER NOT NULL, " \
+                   "deleted INTEGER DEFAULT 0)")
+    
     connection.commit()
     connection.close()
 
@@ -464,6 +475,23 @@ def send_friend_request(sender_id, receiver_id):
         return False, f"Error: {str(e)}"
     
 
+def remove_friend(user_id1, user_id2):
+    connection = connect_db()
+    cursor = connection.cursor()
+
+    try:
+        cursor.execute("DELETE FROM friends WHERE status = 'accepted' AND ((sender_id =? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?))",
+                       (user_id1, user_id2, user_id2, user_id1))
+        connection.commit()
+        connection.close()
+
+        return True, "Friend removed."
+    
+    except Exception as e:
+        connection.close()
+        return False, f"Error: {str(e)}"
+    
+
 def accept_friend_request(request_id): #or sender_id / receiver_id
     connection = connect_db()
     cursor = connection.cursor()
@@ -526,12 +554,75 @@ def are_friends(user_id1, user_id2):
     return result
 
 
+def is_friend_request_pending(user_id1, user_id2):
+    connection = connect_db()
+    cursor = connection.cursor()
+
+    cursor.execute("SELECT * FROM friends WHERE status = 'pending' AND ((sender_id =? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?))",
+                   (user_id1, user_id2, user_id2, user_id1))
+    
+    result = cursor.fetchone() is not None
+    connection.close()
+
+    return result
+
+
 def get_friends(user_id):
     connection = connect_db()
     cursor = connection.cursor()
 
     cursor.execute("SELECT users.* FROM users JOIN friends ON ((friends.sender_id = users.id AND friends.receiver_id = ?) OR (friends.receiver_id = users.id AND friends.sender_id = ?)) WHERE friends.status = 'accepted' AND users.id != ? ORDER BY users.username ASC",
                    (user_id, user_id, user_id))
+    
+    results = []
+    for row in cursor.fetchall():
+        results.append(dict(row))
+    connection.close()
+
+    return results
+
+
+def send_dm(sender_id, receiver_id, content, attachment_data=None, attachment_name=None):
+    connection = connect_db()
+    cursor = connection.cursor()
+
+    try:
+        cursor.execute("INSERT INTO dm_messages (sender_id, receiver_id, content, attachment_data, attachment_name, created) VALUES (?, ?, ?, ?, ?, ?)",
+                       (sender_id, receiver_id, content, attachment_data, attachment_name, timestamp()))
+        
+        message_id = cursor.lastrowid
+        connection.commit()
+        connection.close()
+
+        return True, message_id
+    
+    except Exception as e:
+        connection.close()
+        return False, f"Error: {str(e)}"
+    
+
+def get_dm_messages(user_id1, user_id2, limit=100):
+    connection = connect_db()
+    cursor = connection.cursor()
+
+    cursor.execute("SELECT dm_messages.*, users.username, users.display_name FROM dm_messages JOIN users ON dm_messages.sender_id = users.id WHERE ((dm_messages.sender_id = ? AND dm_messages.receiver_id = ?) OR (dm_messages.sender_id = ? AND dm_messages.receiver_id = ?)) AND dm_messages.deleted = 0 ORDER BY dm_messages.created DESC LIMIT ?",
+                   (user_id1, user_id2, user_id2, user_id1, limit))
+    
+    results = []
+    for row in cursor.fetchall():
+        results.append(dict(row))
+    connection.close()
+
+    results.reverse()
+
+    return results
+
+def get_dm_messages_after(user_id1, user_id2, last_id):
+    connection = connect_db()
+    cursor = connection.cursor()
+
+    cursor.execute("SELECT dm_messages.*, users.username, users.display_name FROM dm_messages JOIN users ON dm_messages.sender_id = users.id WHERE ((dm_messages.sender_id = ? AND dm_messages.receiver_id = ?) OR (dm_messages.sender_id = ? AND dm_messages.receiver_id = ?)) AND dm_messages.id > ? AND dm_messages.deleted = 0 ORDER BY dm_messages.created ASC",
+                   (user_id1, user_id2, user_id2, user_id1, last_id))
     
     results = []
     for row in cursor.fetchall():
