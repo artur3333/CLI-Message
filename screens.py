@@ -1,4 +1,5 @@
 import os
+import re
 from datetime import datetime
 
 from textual.app import ComposeResult
@@ -9,7 +10,7 @@ from textual.containers import Horizontal, Container, ScrollableContainer
 
 import auth
 import db
-from utils import format_timestamp, day_label, should_compact
+from utils import format_timestamp, day_label, should_compact, highlight_mention, get_display_name
 
 
 class LoginScreen(Screen):
@@ -68,6 +69,9 @@ class MainScreen(Screen):
         self.last_message_day = None
         self.last_message_previous = None
 
+        self.global_channel_last_ids = {}
+        self.global_dm_last_ids = {}
+
     def compose(self) -> ComposeResult:
 
         with Container(id="servers-container"):
@@ -102,7 +106,7 @@ class MainScreen(Screen):
                 yield Input(placeholder="Type a message...", id="message-input", disabled=True)
 
         with Container(id="members-container"):
-            yield Label("Members", id="members-title")
+            yield Input(placeholder="Search...", id="search-input")
             with ScrollableContainer(id="members-list"):
                 pass
 
@@ -117,7 +121,9 @@ class MainScreen(Screen):
             self.query_one("#dm-navbar").display = False
             await self.load_servers()
 
-        self.set_interval(5, self.refresh_messages)
+        self.set_interval(1, self.refresh_messages)
+        self.set_interval(1, self.refresh_notifications)
+        self.set_interval(1, self.refresh_badges)
 
 
     async def refresh_messages(self):
@@ -155,9 +161,134 @@ class MainScreen(Screen):
         self.last_message_previous = prev
         self.last_message_day = prev_day
 
-        self.last_message_id = messages[-1]["id"]    
+        self.last_message_id = messages[-1]["id"]
 
         self.query_one("#messages-container").scroll_end(animate=False)
+
+        user = auth.get_current_user()
+        if self.active_mode == "server" and self.active_channel:
+            db.mark_channel_read(user["id"], self.active_channel["id"], self.last_message_id)
+        elif self.active_mode == "dm" and self.active_dm_user:
+            db.mark_dm_read(user["id"], self.active_dm_user["id"], self.last_message_id)
+
+
+    async def refresh_notifications(self):
+        user = auth.get_current_user()
+        
+        for server in db.get_user_servers(user["id"]):
+            for channel in db.get_server_channels(server["id"]):
+                c = channel["id"]
+
+                if self.active_mode == "server" and self.active_channel and self.active_channel["id"] == c:
+                    self.global_channel_last_ids[c] = self.last_message_id
+                    continue
+                
+                if c not in self.global_channel_last_ids:
+                    if db.get_messages_after(c, 0):
+                        self.global_channel_last_ids[c] = db.get_messages_after(c, 0)[-1]["id"]
+                    else:
+                        self.global_channel_last_ids[c] = 0
+                    continue
+
+                messages = db.get_messages_after(c, self.global_channel_last_ids[c])
+                if not messages:
+                    continue
+
+                for message in messages:
+                    if message["sender_id"] == user["id"]:
+                        continue
+                        
+                    mentions = re.findall(r"@(\w+)", message["content"])
+                    if user["username"] in mentions:
+                        self.notify(f"{message["username"]} mentioned you in #{channel["name"]} in {server['name']}", title="Mention", severity="warning")
+
+                self.global_channel_last_ids[channel["id"]] = messages[-1]["id"]
+
+        
+        for friend in db.get_friends(user["id"]):
+            f = friend["id"]
+
+            if self.active_mode == "dm" and self.active_dm_user and self.active_dm_user["id"] == f:
+                self.global_dm_last_ids[f] = self.last_message_id
+                continue
+
+            if f not in self.global_dm_last_ids:
+                if db.get_dm_messages_after(user["id"], f, 0):
+                    self.global_dm_last_ids[f] = db.get_dm_messages_after(user["id"], f, 0)[-1]["id"]
+                else:
+                    self.global_dm_last_ids[f] = 0
+                continue
+
+            messages = db.get_dm_messages_after(user["id"], f, self.global_dm_last_ids[f])
+            if not messages:
+                continue
+
+            for message in messages:
+                if message["sender_id"] == user["id"]:
+                    continue
+
+                self.notify(f"New message from @{message['username']}", title="DM")
+
+            self.global_dm_last_ids[f] = messages[-1]["id"]
+
+    
+    async def refresh_badges(self):
+        user = auth.get_current_user()
+        
+        server_unreads = db.get_all_server_unreads(user["id"])
+        for server_id, count in server_unreads.items():
+            try:
+                button = self.query_one(f"#server-{server_id}", Button)
+                if count > 0:
+                    button.add_class("server-unread")
+                else:
+                    button.remove_class("server-unread")
+            
+            except Exception as e:
+                pass
+
+        dm_unreads = db.get_all_dm_unreads(user["id"])
+        total_dm_unreads = sum(dm_unreads.values())
+        try:
+            dm_button = self.query_one("#dm-button", Button)
+            if total_dm_unreads > 0:
+                dm_button.add_class("dm-server-unread")
+            else:
+                dm_button.remove_class("dm-server-unread")
+
+        except Exception as e:
+            pass
+
+        if self.active_server:
+            for channel in db.get_server_channels(self.active_server["id"]):
+                try:
+                    button = self.query_one(f"#channel-{channel['id']}", Button)
+                    
+                    if self.active_channel and self.active_channel["id"] == channel["id"]:
+                        button.remove_class("channel-unread")
+                        continue
+
+                    unread = db.get_channel_unread_count(user["id"], channel["id"])
+                    if unread > 0:
+                        button.add_class("channel-unread")
+                    else:
+                        button.remove_class("channel-unread")
+
+                except Exception as e:
+                    pass
+
+        if self.active_mode == "dm" and not self.active_dm_user:
+            for friend in db.get_friends(user["id"]):
+                try:
+                    button = self.query_one(f"#dm-{friend['id']}", Button)
+                    unread = db.get_dm_unread_count(user["id"], friend["id"])
+                    if unread > 0:
+                        button.add_class("dm-unread")
+                    else:
+                        button.remove_class("dm-unread")
+
+                except Exception as e:
+                    pass
 
 
     async def load_servers(self):
@@ -194,12 +325,17 @@ class MainScreen(Screen):
         channels = db.get_server_channels(server_id)
         channels_list = self.query_one("#channels-list")
         await channels_list.remove_children()
-
+        user = auth.get_current_user()
+        
         for channel in channels:
             if self.active_channel and self.active_channel["id"] == channel["id"]:
                 classes = "channel-button active-channel"
             else:
                 classes = "channel-button"
+            
+            unread = db.get_channel_unread_count(user["id"], channel["id"])
+            if unread > 0 and not (self.active_channel and self.active_channel["id"] == channel["id"]):
+                classes += " channel-unread"
 
             await channels_list.mount(Button(f"#\u00a0{channel['name']}", id=f"channel-{channel['id']}", classes=classes))
 
@@ -212,10 +348,7 @@ class MainScreen(Screen):
         await members_list.remove_children()
 
         for member in members:
-            if member["display_name"]:
-                name = member["display_name"]
-            else:
-                name = member["username"]
+            name = get_display_name(member)
 
             await members_list.mount(Button(name, id=f"member-{member['id']}", classes="member-button"))
 
@@ -261,10 +394,7 @@ class MainScreen(Screen):
         messages_container = self.query_one("#messages-container")
         await messages_container.remove_children()
 
-        if self.active_dm_user.get("display_name"):
-            name = self.active_dm_user["display_name"]
-        else:
-            name = self.active_dm_user["username"]
+        name = get_display_name(self.active_dm_user)
 
         await messages_container.mount(Static(f"This is the beginning of your direct messages with @{name}", classes="channel-start-placeholder"))
 
@@ -340,15 +470,17 @@ class MainScreen(Screen):
         
         if friends:
             for friend in friends:
-                if friend["display_name"]:
-                    name = friend["display_name"]
-                else:
-                    name = friend["username"]
+                name = get_display_name(friend)
 
                 if self.active_dm_user and self.active_dm_user["id"] == friend["id"]:
                     button_classes = "channel-button active-channel"
                 else:
                     button_classes = "channel-button"
+
+                unread = db.get_dm_unread_count(user["id"], friend["id"])
+                if unread > 0 and not (self.active_dm_user and self.active_dm_user["id"] == friend["id"]):
+                    button_classes += " dm-unread"
+                    name = f"{name} ({unread})"
 
                 await channels_list.mount(Button(name, id=f"dm-{friend['id']}", classes=button_classes))
         
@@ -396,14 +528,12 @@ class MainScreen(Screen):
             await container.mount(FriendRequestCard(request))
 
     async def open_dm(self, user_id):
+        user = auth.get_current_user()
         friend = db.get_user_by_id(user_id)
         if not friend:
             return
         
-        if friend["display_name"]:
-            name = friend["display_name"]
-        else:
-            name = friend["username"]
+        name = get_display_name(friend)
         
         self.active_dm_user = friend
         self.last_message_id = 0
@@ -425,12 +555,15 @@ class MainScreen(Screen):
         self.query_one("#attach-button", Button).disabled = False
         self.query_one("#message-input", Input).placeholder = f"Message @{name}..."
         
-        self.query_one("#members-title", Label).update("")
         await self.query_one("#members-list").remove_children()
         
         await self.query_one("#members-list").mount(DMUserPanel(friend))
 
         await self.load_dm_messages(friend["id"])
+
+        if self.last_message_id:
+            db.mark_dm_read(user["id"], friend["id"], self.last_message_id)
+        await self.load_dm_sidebar()
 
     
     async def switch_server(self, server_id): #! Check thisssssssssssss!!!!
@@ -450,7 +583,6 @@ class MainScreen(Screen):
         self.query_one("#dm-navbar").display = False
         self.query_one("#input-row").display = True
         self.query_one("#members-container").display = True
-        self.query_one("#members-title", Label).update("Members")
 
         self.query_one("#server-name", Label).update(server["name"])
 
@@ -480,6 +612,7 @@ class MainScreen(Screen):
 
     async def switch_channel(self, channel_id):
         channel = db.get_channel_by_id(channel_id)
+        user = auth.get_current_user()
         
         self.active_channel = channel
 
@@ -499,6 +632,9 @@ class MainScreen(Screen):
         self.pending_attachment = None
 
         await self.load_messages(channel_id)
+        
+        if self.last_message_id:
+            db.mark_channel_read(user["id"], channel_id, self.last_message_id)
 
 
     async def send_message(self, content, attachment_path=None):
@@ -566,6 +702,13 @@ class MainScreen(Screen):
 
         self.last_message_id = messages[-1]["id"]
         self.query_one("#messages-container").scroll_end(animate=False)
+
+        if self.active_mode == "server" and self.active_channel and self.last_message_id:
+            db.mark_channel_read(user["id"], self.active_channel["id"], self.last_message_id)
+
+        elif self.active_mode == "dm" and self.active_dm_user and self.last_message_id:
+            db.mark_dm_read(user["id"], self.active_dm_user["id"], self.last_message_id)
+
 
         self.pending_attachment = None
         self.query_one("#attach-button", Button).label = "+"
@@ -776,18 +919,18 @@ class Message(Widget):
             self.add_class("compact-message")
 
     def compose(self) -> ComposeResult:
-        if self.message.get("display_name"):
-            name = self.message["display_name"]
-        else:
-            name = self.message["username"]
+        name = get_display_name(self.message)
 
         time = format_timestamp(self.message["created"])
 
         if not self.compact:
             head = f"[bold]{name}[/bold] [dim][{time}][/dim]"
             yield Static(head, markup=True, classes="message-head")
-        
-        yield Static(self.message["content"], markup=True, classes="message-content")
+
+        current_user = auth.get_current_user()
+        highlighted_content = highlight_mention(self.message["content"], current_user["username"])
+
+        yield Static(highlighted_content, markup=True, classes="message-content")
 
         if self.message.get("attachment_name"):
             filename = os.path.basename(self.message["attachment_name"])
@@ -895,10 +1038,7 @@ class UserProfileScreen(ModalScreen):
             already_friends = False
             request_pending = False
 
-        if self.user.get("display_name"):
-            name = self.user["display_name"]
-        else:
-            name = self.user["username"]
+        name = get_display_name(self.user)
 
         member_since = datetime.fromtimestamp(self.user["created"]).strftime("%b %d, %Y")
             
@@ -954,10 +1094,7 @@ class FriendCard(Widget):
         self.add_class("friend-card")
 
     def compose(self) -> ComposeResult:
-        if self.user.get("display_name"):
-            name = self.user["display_name"]
-        else:
-            name = self.user["username"]
+        name = get_display_name(self.user)
 
         yield Label(f"[bold]{name}[/bold] [dim]@{self.user['username']}[/dim]", markup=True, classes="friend-card-name")
 
@@ -968,10 +1105,7 @@ class FriendRequestCard(Widget):
         self.add_class("friend-request-card")
 
     def compose(self) -> ComposeResult:
-        if self.request.get("display_name"):
-            name = self.request["display_name"]
-        else:
-            name = self.request["username"]
+        name = get_display_name(self.request)
 
         with Horizontal(classes="friend-request-row"):
             yield Label(f"[bold]{name}[/bold] [dim]@{self.request['username']}[/dim]", markup=True, classes="friend-request-name")
@@ -1024,10 +1158,7 @@ class DMUserPanel(Widget):
         self.add_class("dm-user-panel")
 
     def compose(self) -> ComposeResult:
-        if self.user.get("display_name"):
-            name = self.user["display_name"]
-        else:
-            name = self.user["username"]
+        name = get_display_name(self.user)
 
         yield Static(name[0].upper(), classes="dm-panel-avatar")
         yield Static(f"[bold]{name}[/bold]", markup=True, classes="dm-panel-name")

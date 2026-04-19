@@ -376,13 +376,19 @@ MainScreen {
     layout: vertical;
 }
 
-#members-title {
+#search-input {
     width: 100%;
-    height: 4;
-    text-style: bold;
-    color: $text-muted;
-    content-align: center middle;
+    height: 3;
+    margin: 1 0;
     border-bottom: solid $primary-darken-3;
+    background: $panel-darken-1;
+    border-top: none;
+    border-left: none;
+    border-right: none;
+}
+
+#search-input:focus {
+    border-bottom: solid cyan;
 }
 
 #members-list {
@@ -797,3 +803,34 @@ UserProfileScreen #screen-container {
     border: round $error;
     color: $error-darken-2;
 }
+
+
+
+/* Notifications */
+.server-unread {
+    border: round white;
+}
+
+.server-unread:hover {
+    border: round white;
+}
+
+.dm-server-unread {
+    border: round $error;
+}
+
+.dm-server-unread:hover {
+    border: round $error;
+}    
+
+.channel-unread {
+    color: $text;
+    text-style: bold;
+}
+
+.dm-unread {
+    color: $text;
+    text-style: bold;
+}
+
+

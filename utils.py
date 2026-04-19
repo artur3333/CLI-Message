@@ -66,6 +66,13 @@ def format_timestamp(timestamp):
     return time.strftime("%H:%M", time.localtime(timestamp))
 
 
+def get_display_name(user):
+    if user.get("display_name"):
+        return user["display_name"]
+    else:
+        return user["username"]
+
+
 def day_label(timestamp):
     datee = datetime.fromtimestamp(timestamp).date()
     today = datetime.now().date()
@@ -94,3 +101,14 @@ def should_compact(previous_message, current_message):
         return False
 
     return True
+
+
+def highlight_mention(content, username):
+    def replace(match):
+        mention = match.group(1)
+        if mention.lower() == username.lower():
+            return f"[bold white on #5865F2] @{mention} [/bold white on #5865F2]"
+
+        return f"[bold cyan]@{mention}[/bold cyan]"
+    
+    return re.sub(r"@(\w+)", replace, content.replace("[", "\\["))

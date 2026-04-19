@@ -100,6 +100,21 @@ def init_db():
                    "created INTEGER NOT NULL, " \
                    "deleted INTEGER DEFAULT 0)")
     
+    # channel_reads
+    cursor.execute("CREATE TABLE IF NOT EXISTS channel_reads (" \
+                   "user_id INTEGER NOT NULL, " \
+                   "channel_id INTEGER NOT NULL, " \
+                   "last_read_message_id INTEGER DEFAULT 0, " \
+                   "PRIMARY KEY (user_id, channel_id))")
+    
+    # dm_reads
+    cursor.execute("CREATE TABLE IF NOT EXISTS dm_reads (" \
+                   "user_1 INTEGER NOT NULL, " \
+                   "user_2 INTEGER NOT NULL, " \
+                   "user_id INTEGER NOT NULL, " \
+                   "last_read_message_id INTEGER DEFAULT 0, " \
+                   "PRIMARY KEY (user_1, user_2, user_id))")
+    
     connection.commit()
     connection.close()
 
@@ -630,3 +645,172 @@ def get_dm_messages_after(user_id1, user_id2, last_id):
     connection.close()
 
     return results
+
+
+def mark_channel_read(user_id, channel_id, last_id):
+    connection = connect_db()
+    cursor = connection.cursor()
+
+    if last_id == 0:
+        connection.close()
+        return True, ""
+
+    cursor.execute("SELECT * FROM channel_reads WHERE user_id = ? AND channel_id = ?",
+                     (user_id, channel_id))
+    if cursor.fetchone() is None:
+        try:
+            cursor.execute("INSERT INTO channel_reads (user_id, channel_id, last_read_message_id) VALUES (?, ?, ?)",
+                           (user_id, channel_id, last_id))
+            connection.commit()
+            connection.close()
+
+            return True
+    
+        except Exception as e:
+            connection.close()
+            return False, f"Error: {str(e)}"
+
+    else:
+        try:
+            cursor.execute("UPDATE channel_reads SET last_read_message_id = ? WHERE user_id = ? AND channel_id = ?",
+                           (last_id, user_id, channel_id))
+            connection.commit()
+            connection.close()
+
+            return True
+        
+        except Exception as e:
+            connection.close()
+            return False, f"Error: {str(e)}"
+    
+
+def get_channel_unread_count(user_id, channel_id):
+    connection = connect_db()
+    cursor = connection.cursor()
+
+    cursor.execute("SELECT last_read_message_id FROM channel_reads WHERE user_id = ? AND channel_id=?",
+                   (user_id, channel_id))
+    
+    row = cursor.fetchone()
+    if row:
+        last_read_id = row["last_read_message_id"]
+    else:
+        last_read_id = 0
+
+    cursor.execute("SELECT COUNT(*) FROM messages WHERE channel_id = ? AND id > ? AND deleted = 0 AND sender_id != ?",
+                   (channel_id, last_read_id, user_id))
+    count = cursor.fetchone()[0]
+    connection.close()
+
+    return count
+
+
+def get_server_unread_count(user_id, server_id):
+    connection = connect_db()
+    cursor = connection.cursor()
+
+    if not cursor.execute("SELECT * FROM server_members WHERE server_id = ? AND user_id = ?",
+                          (server_id, user_id)).fetchone():
+        connection.cursor.close()
+        return 0
+
+    cursor.execute("SELECT id FROM channels WHERE server_id = ?",
+                   (server_id,))
+    
+    channel_ids = []
+    for row in cursor.fetchall():
+        channel_ids.append(row["id"])
+    
+    connection.close()
+
+    total_count = 0
+    for channel_id in channel_ids:
+        total_count = total_count + get_channel_unread_count(user_id, channel_id)
+    
+    return total_count
+
+
+def get_all_server_unreads(user_id):
+    servers = get_user_servers(user_id)
+
+    result = {}
+    for server in servers:
+        result[server["id"]] = get_server_unread_count(user_id, server["id"])
+
+    return result
+
+
+def mark_dm_read(user_id1, user_id2, last_id):
+    connection = connect_db()
+    cursor = connection.cursor()
+
+    if last_id == 0:
+        connection.close()
+        return True, ""
+    
+    user_1 = min(user_id1, user_id2)
+    user_2 = max(user_id1, user_id2)
+
+    cursor.execute("SELECT * FROM dm_reads WHERE user_1 =? AND user_2 = ? AND user_id = ?",
+                   (user_1, user_2, user_id1))
+    if cursor.fetchone() is None:
+        try:
+            cursor.execute("INSERT INTO dm_reads (user_1, user_2, user_id, last_read_message_id) VALUES (?, ?, ?, ?)",
+                           (user_1, user_2, user_id1, last_id))
+            connection.commit()
+            connection.close()
+
+            return True
+    
+        except Exception as e:
+            connection.close()
+            return False, f"Error: {str(e)}"
+    
+    else:
+        try:
+            cursor.execute("UPDATE dm_reads SET last_read_message_id = ? WHERE user_1 = ? AND user_2 = ? AND user_id = ?",
+                           (last_id, user_1, user_2, user_id1))
+            connection.commit()
+            connection.close()
+
+            return True
+        
+        except Exception as e:
+            connection.close()
+            return False, f"Error: {str(e)}"
+        
+
+def get_dm_unread_count(user_id1, user_id2):
+    connection = connect_db()
+    cursor = connection.cursor()
+
+    user_1 = min(user_id1, user_id2)
+    user_2 = max(user_id1, user_id2)
+
+    cursor.execute("SELECT last_read_message_id FROM dm_reads WHERE user_1 =? AND user_2 = ? AND user_id = ?",
+                   (user_1, user_2, user_id1))
+    
+    row = cursor.fetchone()
+    if row:
+        last_read_id = row["last_read_message_id"]
+    else:
+        last_read_id = 0
+
+    cursor.execute("SELECT COUNT(*) FROM dm_messages WHERE ((sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?)) AND id > ? AND deleted = 0 AND sender_id != ?",
+                   (user_id1, user_id2, user_id2, user_id1, last_read_id, user_id1))
+    
+    count = cursor.fetchone()[0]
+    connection.close()
+
+    return count
+
+
+def get_all_dm_unreads(user_id):
+    friends = get_friends(user_id)
+
+    result = {}
+    for friend in friends:
+        result[friend["id"]] = get_dm_unread_count(user_id, friend["id"])
+
+    return result
+        
