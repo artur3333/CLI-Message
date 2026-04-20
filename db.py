@@ -455,6 +455,38 @@ def get_messages_after(channel_id, last_id):
     return results
 
 
+def search_messages(channel_id, query, limit=20, offset=0):
+    connection = connect_db()
+    cursor = connection.cursor()
+
+    cursor.execute("SELECT messages.*, users.username, users.display_name FROM messages JOIN users ON messages.sender_id = users.id WHERE messages.channel_id = ? AND messages.content LIKE ? AND messages.deleted = 0 ORDER BY messages.created DESC LIMIT ? OFFSET ?",
+                   (channel_id, f"%{query}%", limit, offset))
+    
+    results = []
+    for row in cursor.fetchall():
+        results.append(dict(row))
+    connection.close()
+
+    results.reverse()
+    return results
+
+
+def search_dm_messages(user_id1, user_id2, query, limit=20, offset=0):
+    connection = connect_db()
+    cursor = connection.cursor()
+
+    cursor.execute("SELECT dm_messages.*, users.username, users.display_name FROM dm_messages JOIN users ON dm_messages.sender_id = users.id WHERE ((dm_messages.sender_id = ? AND dm_messages.receiver_id = ?) OR (dm_messages.sender_id = ? AND dm_messages.receiver_id = ?)) AND dm_messages.content LIKE ? AND dm_messages.deleted = 0 ORDER BY dm_messages.created DESC LIMIT ? OFFSET ?",
+                   (user_id1, user_id2, user_id2, user_id1, f"%{query}%", limit, offset))
+    
+    results = []
+    for row in cursor.fetchall():
+        results.append(dict(row))
+    connection.close()
+
+    results.reverse()
+    return results
+
+
 def send_friend_request(sender_id, receiver_id):
     connection = connect_db()
     cursor = connection.cursor()

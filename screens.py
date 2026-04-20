@@ -71,6 +71,10 @@ class MainScreen(Screen):
 
         self.global_channel_last_ids = {}
         self.global_dm_last_ids = {}
+        
+        self.search_active = False
+
+        self.loading_members = False
 
     def compose(self) -> ComposeResult:
 
@@ -343,14 +347,24 @@ class MainScreen(Screen):
 
     
     async def load_members(self, server_id):
-        members = db.get_server_members(server_id)
-        members_list = self.query_one("#members-list")
-        await members_list.remove_children()
+        if self.search_active:
+            return
+        
+        if self.loading_members:
+            return
+        self.loading_members = True
+        try:
+            members = db.get_server_members(server_id)
+            members_list = self.query_one("#members-list")
+            await members_list.remove_children()
 
-        for member in members:
-            name = get_display_name(member)
+            for member in members:
+                name = get_display_name(member)
 
-            await members_list.mount(Button(name, id=f"member-{member['id']}", classes="member-button"))
+                await members_list.mount(Button(name, id=f"member-{member['id']}", classes="member-button"))
+        
+        finally:
+            self.loading_members = False
 
 
     async def load_messages(self, channel_id):
@@ -436,6 +450,9 @@ class MainScreen(Screen):
         self.last_message_day = None
         self.last_message_previous = None
 
+        self.search_active = False
+        self.query_one("#members-container").remove_class("search-active")
+
         await self.load_servers()
 
         self.query_one("#server-name", Label).update("Direct Messages")
@@ -455,6 +472,8 @@ class MainScreen(Screen):
 
         await self.query_one("#members-list").remove_children()
         await self.load_dm_friends_view()
+
+        self.query_one("#search-input", Input).placeholder = "Search friends..."
 
 
     async def load_dm_sidebar(self):
@@ -540,6 +559,9 @@ class MainScreen(Screen):
         self.last_message_day = None
         self.last_message_previous = None
 
+        self.search_active = False
+        self.query_one("#members-container").remove_class("search-active")
+
         for button in self.query(".channel-button"):
             button.remove_class("active-channel")
         
@@ -554,6 +576,7 @@ class MainScreen(Screen):
         self.query_one("#message-input", Input).disabled = False
         self.query_one("#attach-button", Button).disabled = False
         self.query_one("#message-input", Input).placeholder = f"Message @{name}..."
+        self.query_one("#search-input", Input).placeholder = "Search messages..."
         
         await self.query_one("#members-list").remove_children()
         
@@ -577,12 +600,15 @@ class MainScreen(Screen):
         self.active_dm_user = None
         self.last_message_day = None
         self.last_message_previous = None
+        self.search_active = False
+        self.query_one("#members-container").remove_class("search-active")
 
         
         self.query_one("#chat-title").display = True
         self.query_one("#dm-navbar").display = False
         self.query_one("#input-row").display = True
         self.query_one("#members-container").display = True
+        self.query_one("#search-input", Input).placeholder = "Search members..."
 
         self.query_one("#server-name", Label).update(server["name"])
 
@@ -615,6 +641,8 @@ class MainScreen(Screen):
         user = auth.get_current_user()
         
         self.active_channel = channel
+        self.search_active = False
+        self.query_one("#members-container").remove_class("search-active")
 
         header = f" # {channel['name']}"
         if channel.get("description"):
@@ -629,6 +657,7 @@ class MainScreen(Screen):
         self.query_one("#message-input", Input).disabled = False
         self.query_one("#attach-button", Button).disabled = False
         self.query_one("#message-input", Input).placeholder = f"Message # {channel['name']}..."
+        self.query_one("#search-input", Input).placeholder = "Search messages..."
         self.pending_attachment = None
 
         await self.load_messages(channel_id)
@@ -718,6 +747,69 @@ class MainScreen(Screen):
 
         else:
             self.query_one("#message-input", Input).placeholder = "Type a message..."
+
+
+    async def search(self, query):
+        members_list = self.query_one("#members-list")
+        user = auth.get_current_user()
+        query = query.strip()
+
+        if not query:
+            self.search_active = False
+            self.query_one("#members-container").remove_class("search-active")
+            await members_list.remove_children()
+
+            if self.active_mode == "server" and self.active_server:
+                await self.load_members(self.active_server["id"])
+            
+            elif self.active_mode == "dm" and self.active_dm_user:
+                await members_list.mount(DMUserPanel(self.active_dm_user))
+
+            return
+        
+        self.search_active = True
+        self.query_one("#members-container").add_class("search-active")
+        await members_list.remove_children()
+
+        if self.active_mode == "server":
+            if self.active_channel:
+                results = db.search_messages(self.active_channel["id"], query)
+                if results:
+                    await members_list.mount(Static(f"Search Results for \"{query}\"", classes="search-results-title"))
+                    for message in results:
+                        await members_list.mount(SearchResult(message))
+                    
+                else:
+                    await members_list.mount(Static(f"No results found for \"{query}\"", classes="search-results-title"))
+
+            
+            if self.active_server:
+                members = db.get_server_members(self.active_server["id"])
+            else:
+                members = []
+
+            matched = []
+            for member in members:
+                name = get_display_name(member)
+                if query.lower() in name.lower():
+                    matched.append(member)
+
+            if matched:
+                await members_list.mount(Static(f"Members matching \"{query}\"", classes="search-results-title"))
+                for member in matched:
+                    await members_list.mount(Button(get_display_name(member), id=f"member-{member['id']}", classes="member-button"))
+            
+        
+        elif self.active_mode == "dm":
+            if self.active_dm_user:
+                results = db.search_dm_messages(user["id"], self.active_dm_user["id"], query)
+                if results:
+                    await members_list.mount(Static(f"Search Results for \"{query}\"", classes="search-results-title"))
+                    for message in results:
+                        await members_list.mount(SearchResult(message))
+                
+                else:
+                    await members_list.mount(Static(f"No results found for \"{query}\"", classes="search-results-title"))
 
 
     async def on_button_pressed(self, event: Button.Pressed):
@@ -851,8 +943,37 @@ class MainScreen(Screen):
 
             await self.send_message(content, attachment_path=self.pending_attachment)
 
-        else:
+        elif event.input.id == "search-input":
+            query = event.value.strip()
+            await self.search(query)
             return
+        
+        
+    async def on_input_changed(self, event: Input.Changed):
+        if event.input.id != "search-input":
+            return
+        
+        if event.value.strip():
+            return
+        
+        self.search_active = False
+        self.query_one("#members-container").remove_class("search-active")
+
+        if self.active_mode == "server" and self.active_server:
+            await self.load_members(self.active_server["id"])
+        
+        elif self.active_mode == "dm" and self.active_dm_user:
+            await self.query_one("#members-list").remove_children()
+            await self.query_one("#members-list").mount(DMUserPanel(self.active_dm_user))
+        
+        
+
+        #! later maybe
+        # query = event.value.strip()
+        # if self.active_mode == "server" and self.active_server:
+        #     if not query:
+        #         self.search_active = False
+        #         await self.load_members(self.active_server["id"])
 
 
     
@@ -1086,6 +1207,22 @@ class UserProfileScreen(ModalScreen):
             self.dismiss()
 
 
+
+class SearchResult(Widget):
+    def __init__(self, message):
+        super().__init__()
+        self.message = message
+        self.add_class("search-result")
+
+    def compose(self) -> ComposeResult:
+        name = get_display_name(self.message)
+        time = format_timestamp(self.message["created"])
+        current_user = auth.get_current_user()
+
+        yield Static(f"[bold]{name}[/bold] [dim][{time}][/dim]", markup=True, classes="search-result-head")
+        
+        highlighted_content = highlight_mention(self.message["content"], current_user["username"])
+        yield Static(highlighted_content, markup=True, classes="search-result-content")
 
 class FriendCard(Widget):
     def __init__(self, user):
