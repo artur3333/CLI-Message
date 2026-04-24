@@ -71,6 +71,38 @@ def get_display_name(user):
         return user["display_name"]
     else:
         return user["username"]
+    
+def get_display_name_markup(user):
+    name = get_display_name(user)
+    color = user.get("name_color", "")
+    if color and color in ["white", "cyan", "green", "yellow", "magenta", "red", "blue", "bright_cyan", "bright_green", "bright_yellow", "bright_magenta", "bright_red"]:
+        bugged_colors = {
+            "white": "bright_white",
+            "cyan":   "#00bcd4",
+            "green":  "#4caf50",
+            "yellow": "#ffeb3b",
+            "magenta": "#e91e63",
+            "red":    "#f44336",
+            "blue":   "#2196f3",
+            "bright_cyan":   "#00e5ff",
+            "bright_green":  "#69ff47",
+            "bright_yellow": "#ffe066",
+            "bright_magenta":"#ff6ef7",
+            "bright_red":    "#ff6b6b",
+        }
+        rich_color = bugged_colors.get(color, color)
+        return f"[bold {rich_color}]{name}[/bold {rich_color}]"
+    
+    return f"[bold]{name}[/bold]"
+
+
+def get_accent_color(user):
+    color = user.get("accent_color", "dark_blue")
+    if color not in ["dark_blue", "dark_green", "dark_red", "dark_magenta", "dark_cyan"]:
+        color = "dark_blue"
+    
+    return color
+        
 
 
 def day_label(timestamp):

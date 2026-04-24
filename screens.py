@@ -1,7 +1,9 @@
 import os
 import re
+import json
 from datetime import datetime
 
+from rich.text import Text
 from textual.app import ComposeResult
 from textual.screen import Screen, ModalScreen
 from textual.widgets import Input, Button, Static, Label
@@ -10,7 +12,7 @@ from textual.containers import Horizontal, Container, ScrollableContainer
 
 import auth
 import db
-from utils import format_timestamp, day_label, should_compact, highlight_mention, get_display_name
+from utils import format_timestamp, day_label, should_compact, highlight_mention, get_display_name, get_display_name_markup, get_accent_color
 
 
 class LoginScreen(Screen):
@@ -90,9 +92,15 @@ class MainScreen(Screen):
                 pass
 
             with Container(id="user-info"):
-                with Horizontal():
-                    yield Label(f"", id="username-label")
-                    yield Button("L", id="logout-button")
+                yield Static("", id ="user-info-avatar")
+                
+                with Container(id="user-info-text"):
+                    yield Label("", id="user-info-name")
+                    yield Label("", id="user-info-status")
+
+                with Horizontal(id = "user-info-buttons"):
+                    yield Button("M", id="edit-profile-button", classes="user-info-button")
+                    yield Button("L", id="logout-button", classes="user-info-button")
 
         with Container(id="chat-container"):
             yield Label("", id="chat-title")
@@ -117,7 +125,9 @@ class MainScreen(Screen):
         
     async def on_mount(self):
         user = auth.get_current_user()
-        self.query_one("#username-label", Label).update(f"@{user['username']}")
+        await self.refresh_user_info(user)
+        accent = get_accent_color(user)
+
 
         if self.active_mode == "dm":
             await self.switch_dm_mode()
@@ -128,6 +138,17 @@ class MainScreen(Screen):
         self.set_interval(1, self.refresh_messages)
         self.set_interval(1, self.refresh_notifications)
         self.set_interval(1, self.refresh_badges)
+
+
+    async def refresh_user_info(self, user):
+        name = get_display_name(user)
+        markup_name = get_display_name_markup(user)
+        accent = get_accent_color(user)
+
+        self.query_one("#user-info-avatar", Static).update(name[0].upper())
+        self.query_one("#user-info-avatar", Static).set_classes(f"user-info-avatar")
+        self.query_one("#user-info-name", Label).update(Text.from_markup(markup_name))
+        self.query_one("#user-info-status", Label).update(user.get("status") or f"[dim]@{user['username']}[/dim]")
 
 
     async def refresh_messages(self):
@@ -359,9 +380,9 @@ class MainScreen(Screen):
             await members_list.remove_children()
 
             for member in members:
-                name = get_display_name(member)
+                name = get_display_name_markup(member)
 
-                await members_list.mount(Button(name, id=f"member-{member['id']}", classes="member-button"))
+                await members_list.mount(Button(Text.from_markup(name), id=f"member-{member['id']}", classes="member-button"))
         
         finally:
             self.loading_members = False
@@ -489,19 +510,20 @@ class MainScreen(Screen):
         
         if friends:
             for friend in friends:
-                name = get_display_name(friend)
+                markup_name = get_display_name_markup(friend)
 
                 if self.active_dm_user and self.active_dm_user["id"] == friend["id"]:
                     button_classes = "channel-button active-channel"
                 else:
                     button_classes = "channel-button"
-
+                
+                dm_text = Text.from_markup(markup_name)
                 unread = db.get_dm_unread_count(user["id"], friend["id"])
                 if unread > 0 and not (self.active_dm_user and self.active_dm_user["id"] == friend["id"]):
                     button_classes += " dm-unread"
-                    name = f"{name} ({unread})"
+                    dm_text.append(f" ({unread})")
 
-                await channels_list.mount(Button(name, id=f"dm-{friend['id']}", classes=button_classes))
+                await channels_list.mount(Button(dm_text, id=f"dm-{friend['id']}", classes=button_classes))
         
         else:
             await channels_list.mount(Static("No friends yet...", classes="channel-placeholder"))
@@ -925,6 +947,10 @@ class MainScreen(Screen):
             else:
                 self.notify(result, title="Error")
 
+        elif button_id == "edit-profile-button":
+            user = auth.get_current_user()
+            self.app.push_screen(EditProfile(user), self.after_profile_edit)
+
         elif button_id == "logout-button":
             auth.logout()
             self.app.pop_screen()
@@ -1018,6 +1044,15 @@ class MainScreen(Screen):
             
         else:
             return
+        
+    async def after_profile_edit(self, result):
+        if result:
+            user = auth.get_current_user()
+            auth.current_user = db.get_user_by_id(user["id"])
+            await self.refresh_user_info(db.get_user_by_id(user["id"]))
+            
+            self.notify("Profile updated", title="Profile")
+
 
 
 class DaySeparator(Widget):
@@ -1040,13 +1075,13 @@ class Message(Widget):
             self.add_class("compact-message")
 
     def compose(self) -> ComposeResult:
-        name = get_display_name(self.message)
+        name = get_display_name_markup(self.message)
 
         time = format_timestamp(self.message["created"])
 
         if not self.compact:
-            head = f"[bold]{name}[/bold] [dim][{time}][/dim]"
-            yield Static(head, markup=True, classes="message-head")
+            head = f"{name} [dim][{time}][/dim]"
+            yield Static(Text.from_markup(head), classes="message-head")
 
         current_user = auth.get_current_user()
         highlighted_content = highlight_mention(self.message["content"], current_user["username"])
@@ -1150,7 +1185,6 @@ class UserProfileScreen(ModalScreen):
 
     def compose(self) -> ComposeResult:
         current_user = auth.get_current_user()
-
         is_self = current_user["id"] == self.user["id"]
         if not is_self:
             already_friends = db.are_friends(current_user["id"], self.user["id"])
@@ -1158,31 +1192,62 @@ class UserProfileScreen(ModalScreen):
         else:
             already_friends = False
             request_pending = False
-
         name = get_display_name(self.user)
-
+        accent = get_accent_color(self.user)
+        raw_connections = self.user.get("connections", [])
+        current_connections = json.loads(raw_connections)
+        markup_name = get_display_name_markup(self.user)
         member_since = datetime.fromtimestamp(self.user["created"]).strftime("%b %d, %Y")
+        note = db.get_user_note(current_user["id"], self.user["id"])
             
-        with Container(id="screen-container"):
+        with ScrollableContainer(id="screen-container"):
             with Horizontal(id="profile-top-row"):
                 yield Static("", classes="profile-top-row-separator")
-                yield Button("X", classes="profile-close-button")
+                yield Button("X", id="profile-close-button")
             yield Label("", id="screen-error", classes="hidden")
 
+            yield Static("", classes=f"profile-banner accent-{accent}")
             yield Static(name[0].upper(), classes="profile-avatar")
-            yield Label(f"[bold]{name}[/bold]", markup=True, classes="profile-name-label")
+            yield Label(Text.from_markup(markup_name), classes="profile-name-label")
             yield Label(f"@{self.user['username']}", classes="profile-username-label")
-
-            if self.user.get("bio"): #TODO: later add option to edit bio
+            
+            if self.user.get("pronouns"):
+                yield Static(self.user["pronouns"], classes="profile-pronouns-label")
+            
+            if self.user.get("status"):
+                yield Static(self.user["status"], classes=f"profile-status-label")
+            
+            yield Static("[dim]ABOUT ME[/dim]", markup=True, classes="profile-section-label")
+            if self.user.get("bio"):
                 yield Static(self.user["bio"], classes="profile-bio-label")
             else:
                 yield Static("[dim]No bio[/dim]", markup=True, classes="profile-bio-label")
 
-            yield Static(f"[dim]Member since {member_since}[/dim]", markup=True, classes="profile-member-since")
+            if current_connections:
+                yield Static("[dim]CONNECTED ACCOUNTS[/dim]", markup=True, classes="profile-section-label")
+                for connection in current_connections:
+                    label = connection.get("label", "No label")
+                    url = connection.get("url", "")
+                    if label or url:
+                        if label and url:
+                            yield Static(f"[link]{label}[/link] [dim]{url}[/dim]", markup=True, classes="profile-connection-item")
+                        elif label:
+                            yield Static(f"[link]{label}[/link]", markup=True, classes="profile-connection-item")
+                        elif url:
+                            yield Static(f"[dim]{url}[/dim]", markup=True, classes="profile-connection-item") 
 
+            yield Static(f"[dim]Member since {member_since}[/dim]", markup=True, classes="profile-member-since")
+            
             if not is_self:
+                yield Static("[dim]NOTE (only visible to you)[/dim]", markup=True, classes="profile-section-label")
+                yield Input(value=note, placeholder="Add note about this user...", id="profile-note-input")
+                yield Button("Save Note", id="save-note-button")
+            
+            if is_self:
+                yield Button("Edit Profile", id=f"member-{self.user['id']}", classes="profile-edit-button")
+            else:
                 if already_friends:
-                    yield Static("Already friends", id="profile-friend-status")
+                    yield Static("Already friends", classes="profile-friend-status")
                 
                 elif request_pending:
                     yield Static("Request pending", id="add-friend-profile-button", disabled=True)
@@ -1191,7 +1256,8 @@ class UserProfileScreen(ModalScreen):
                     yield Button("+ Add Friend", id="add-friend-profile-button")
 
     def on_button_pressed(self, event: Button.Pressed):
-        if event.button.id == "add-friend-profile-button":
+        button_id = event.button.id
+        if button_id == "add-friend-profile-button":
             current_user = auth.get_current_user()
             success, result = db.send_friend_request(current_user["id"], self.user["id"])
             error = self.query_one("#screen-error", Label)
@@ -1203,9 +1269,36 @@ class UserProfileScreen(ModalScreen):
                 error.remove_class("hidden")
                 error.update(result)
 
+        elif button_id and button_id.startswith("member-"):
+            user_id = button_id.split("-", 1)[1]
+            if user_id == str(auth.get_current_user()["id"]):
+                self.app.push_screen(EditProfile(self.user), self.after_profile_edit)
+                
+            else:
+                self.dismiss()
+
+        elif button_id == "save-note-button":
+            current_user = auth.get_current_user()
+            note = self.query_one("#profile-note-input", Input).value
+            db.set_user_note(current_user["id"], self.user["id"], note)
+            self.notify("Note saved", title="Note")
+
+        elif button_id == "profile-close-button":
+            self.dismiss()
+
         else:
             self.dismiss()
 
+    async def after_profile_edit(self, result):
+        if result:
+            user = auth.get_current_user()
+            auth.current_user = db.get_user_by_id(user["id"])
+            main = next(s for s in self.app.screen_stack if isinstance(s, MainScreen))
+            await main.refresh_user_info(db.get_user_by_id(user["id"]))
+            
+            self.notify("Profile updated", title="Profile")
+
+        self.dismiss()
 
 
 class SearchResult(Widget):
@@ -1215,11 +1308,11 @@ class SearchResult(Widget):
         self.add_class("search-result")
 
     def compose(self) -> ComposeResult:
-        name = get_display_name(self.message)
+        name = get_display_name_markup(self.message)
         time = format_timestamp(self.message["created"])
         current_user = auth.get_current_user()
 
-        yield Static(f"[bold]{name}[/bold] [dim][{time}][/dim]", markup=True, classes="search-result-head")
+        yield Static(Text.from_markup(f"{name} [dim][{time}][/dim]"), classes="search-result-head")
         
         highlighted_content = highlight_mention(self.message["content"], current_user["username"])
         yield Static(highlighted_content, markup=True, classes="search-result-content")
@@ -1231,9 +1324,9 @@ class FriendCard(Widget):
         self.add_class("friend-card")
 
     def compose(self) -> ComposeResult:
-        name = get_display_name(self.user)
+        markup_name = get_display_name_markup(self.user)
 
-        yield Label(f"[bold]{name}[/bold] [dim]@{self.user['username']}[/dim]", markup=True, classes="friend-card-name")
+        yield Label(Text.from_markup(f"{markup_name} [dim]@{self.user['username']}[/dim]"), classes="friend-card-name")
 
 class FriendRequestCard(Widget):
     def __init__(self, request):
@@ -1242,10 +1335,10 @@ class FriendRequestCard(Widget):
         self.add_class("friend-request-card")
 
     def compose(self) -> ComposeResult:
-        name = get_display_name(self.request)
+        markup_name = get_display_name_markup(self.request)
 
         with Horizontal(classes="friend-request-row"):
-            yield Label(f"[bold]{name}[/bold] [dim]@{self.request['username']}[/dim]", markup=True, classes="friend-request-name")
+            yield Label(Text.from_markup(f"{markup_name} [dim]@{self.request['username']}[/dim]"), classes="friend-request-name")
                 
             yield Button("✓", id=f"accept-{self.request['id']}", classes="friend-request-accept-button", variant="success")
             yield Button("✗", id=f"decline-{self.request['id']}", classes="friend-request-decline-button", variant="error")
@@ -1296,11 +1389,22 @@ class DMUserPanel(Widget):
 
     def compose(self) -> ComposeResult:
         name = get_display_name(self.user)
+        markup_name = get_display_name_markup(self.user)
+        accent = get_accent_color(self.user)
 
+        yield Static("", classes=f"dm-panel-banner accent-{accent}")
         yield Static(name[0].upper(), classes="dm-panel-avatar")
-        yield Static(f"[bold]{name}[/bold]", markup=True, classes="dm-panel-name")
+        yield Static(Text.from_markup(markup_name), classes="dm-panel-name")
         yield Static(f"@{self.user['username']}", classes="dm-panel-username")
 
+        if self.user.get("pronouns"):
+            yield Static(self.user["pronouns"], classes="dm-panel-pronouns")
+        
+        if self.user.get("status"):
+            yield Static(self.user["status"], classes=f"dm-panel-status")
+
+        yield Static("", classes="dm-panel-separator")
+        yield Static("[dim]ABOUT ME[/dim]", markup=True, classes="dm-panel-section-label")
         bio = self.user.get("bio", "")
         if bio:
             yield Static(bio, classes="dm-panel-bio")
@@ -1315,6 +1419,141 @@ class DMUserPanel(Widget):
             yield Button("Remove Friend", id=f"removefriend-{self.user['id']}", classes="dm-panel-remove-button")
 
 
+
+class EditProfile(ModalScreen):
+    def __init__(self, user):
+        super().__init__()
+        self.user = user
+
+    def compose(self) -> ComposeResult:
+        name = get_display_name(self.user)
+        markup_name = get_display_name_markup(self.user)
+        accent = get_accent_color(self.user)
+
+        with Container(id="edit-profile-container"):
+            with Horizontal(id="edit-profile-header"):
+                yield Label("Edit Profile", classes="screen-title")
+                yield Button("X", id="edit-profile-close-button")
+            
+            yield Label("", id="edit-profile-error", classes="hidden")
+            
+            with Container(id="edit-profile-preview", classes=f"edit-profile-preview accent-{accent}"):
+                yield Static(name[0].upper(), id="edit-profile-preview-avatar")
+                yield Static(Text.from_markup(markup_name), markup=True, id="edit-profile-preview-name")
+                if self.user.get("pronouns"):
+                    yield Static(self.user["pronouns"], id="edit-profile-preview-pronouns")
+            
+            yield Label("ABOUT ME", classes="edit-profile-section-label")
+            yield Label("Display Name", classes="field-label")
+            yield Input(value=self.user.get("display_name", "Your display name"), id="edit-profile-display-name-input")
+
+            yield Label("Pronouns", classes="field-label")
+            yield Input(value=self.user.get("pronouns", ""), id="edit-profile-pronouns-input")
+
+            yield Label("Bio (max 256 characters)", classes="field-label")
+            yield Input(value=self.user.get("bio", ""), id="edit-profile-bio-input")
+
+            yield Label("Status", classes="field-label")
+            yield Input(value=self.user.get("status", ""), id="edit-profile-status-input")
+
+            yield Label("APPEARANCE", classes="edit-profile-section-label")
+            yield Label("Name Color", classes="field-label")
+            yield Label("Choose a color for your display name.", classes="edit-profile-field-description")
+            with Horizontal(classes="edit-profile-color-row"):
+                for color in ["white", "cyan", "green", "yellow", "magenta", "red", "blue", "bright_cyan", "bright_green", "bright_yellow", "bright_magenta", "bright_red"]:
+                    yield Button(f"A", id= f"name-color-{color}", classes="edit-profile-color-option" + (" edit-profile-color-selected" if self.user.get("name_color") == color else ""))
+
+            yield Label("Profile Accent Color", classes="field-label")
+            yield Label("Shown as your profile banner color.", classes="edit-profile-field-description")
+            with Horizontal(classes="edit-profile-color-row"):
+                for color in ["dark_blue", "dark_green", "dark_red", "dark_magenta", "dark_cyan"]:
+                    yield Button(f"A", id= f"accent-color-{color}", classes="edit-profile-accent-option" + (" edit-profile-color-selected" if self.user.get("accent_color", "dark_blue") == color else ""))
+
+            yield Label("CONNECTIONS", classes="edit-profile-section-label")
+            yield Static("Each connection has a label and a URL.", classes="edit-profile-field-description")
+            raw_connections = self.user.get("connections", [])
+            current_connections = json.loads(raw_connections)
+
+            for i in range(5):
+                if len(current_connections) > i:
+                    connection = current_connections[i]
+                else:
+                    connection = {}
+                with Horizontal(classes="edit-profile-connection-row"):
+                    yield Input(value=connection.get("label", ""), classes="edit-profile-connection-label-input", id=f"edit-profile-connection-label-{i}", placeholder=f"Label #{i+1}")
+                    yield Input(value=connection.get("url", ""), classes="edit-profile-connection-url-input", id=f"edit-profile-connection-url-{i}", placeholder=f"URL #{i+1}")
+                
+            with Horizontal(id="edit-profile-buttons"):
+                yield Button("Save Changes", id="edit-profile-save-button", variant="primary")
+                yield Button("Cancel", id="edit-profile-cancel-button")
+
+    
+    def on_button_pressed(self, event: Button.Pressed):
+        button_id = event.button.id
+        if button_id and button_id.startswith("name-color-"):
+            color = button_id.split("name-color-", 1)[1]
+
+            for color in ["white", "cyan", "green", "yellow", "magenta", "red", "blue", "bright_cyan", "bright_green", "bright_yellow", "bright_magenta", "bright_red"]:
+                self.query_one(f"#name-color-{color}", Button).remove_class("edit-profile-color-selected")
+            
+            event.button.add_class("edit-profile-color-selected")
+            return
+        
+        elif button_id and button_id.startswith("accent-color-"):
+            color = button_id.split("accent-color-", 1)[1]
+            for color in ["dark_blue", "dark_green", "dark_red", "dark_magenta", "dark_cyan"]:
+                self.query_one(f"#accent-color-{color}", Button).remove_class("edit-profile-color-selected")
+            
+            event.button.add_class("edit-profile-color-selected")
+            preview = self.query_one("#edit-profile-preview")
+            for color in ["dark_blue", "dark_green", "dark_red", "dark_magenta", "dark_cyan"]:
+                preview.remove_class(f"accent-{color}")
+            
+            preview.add_class(f"accent-{color}")
+            return
+        
+        elif button_id == "edit-profile-close-button":
+            self.dismiss()
+            return
+        
+        elif button_id == "edit-profile-cancel-button":
+            self.dismiss()
+            return
+
+        elif button_id == "edit-profile-save-button":
+            error = self.query_one("#edit-profile-error", Label)
+            display_name = self.query_one("#edit-profile-display-name-input", Input).value.strip()
+            pronouns = self.query_one("#edit-profile-pronouns-input", Input).value.strip()
+            bio = self.query_one("#edit-profile-bio-input", Input).value.strip()
+            status = self.query_one("#edit-profile-status-input", Input).value.strip()
+            
+            name_color = ""
+            for color in ["white", "cyan", "green", "yellow", "magenta", "red", "blue", "bright_cyan", "bright_green", "bright_yellow", "bright_magenta", "bright_red"]:
+                if "edit-profile-color-selected" in self.query_one(f"#name-color-{color}", Button).classes:
+                    name_color = color
+                    break
+
+            accent_color = self.user.get("accent_color", "dark_blue")
+            for color in ["dark_blue", "dark_green", "dark_red", "dark_magenta", "dark_cyan"]:
+                if "edit-profile-color-selected" in self.query_one(f"#accent-color-{color}", Button).classes:
+                    accent_color = color
+                    break
+            
+            connections = []
+            for i in range(5):
+                label = self.query_one(f"#edit-profile-connection-label-{i}", Input).value.strip()
+                url = self.query_one(f"#edit-profile-connection-url-{i}", Input).value.strip()
+                if label or url:
+                    connections.append({"label": label, "url": url})
+            
+            success, result = db.update_profile(self.user["id"], display_name=display_name, pronouns=pronouns, bio=bio, status=status, name_color=name_color, accent_color=accent_color, connections=connections)
+            if success:
+                self.dismiss(True)
+            else:
+                error.remove_class("hidden")
+                error.update(result)
+
+                
 
 class ServerOptionsScreen(ModalScreen):
     def compose(self) -> ComposeResult:

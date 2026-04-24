@@ -122,6 +122,7 @@ MainScreen {
     color: cyan;
     content-align: left middle;
     text-overflow: ellipsis;
+    text-wrap: nowrap;
 }
 
 .invite-button {
@@ -188,29 +189,69 @@ MainScreen {
 }
 
 #user-info {
-    height: 3;
+    height: 4;
     background: $panel-darken-2;
-    padding: 1;
-    content-align: left middle;
+    padding: 0 1;
+    border-top: solid $primary-darken-3;
+    layout: horizontal;
+    align: left middle;
 }
 
-#username-label {
+.user-info-avatar {
+    width: 5;
+    height: 3;
+    border: round $primary-darken-1;
+    content-align: center middle;
+    text-align: center;
     text-style: bold;
-    width: 1fr;
+    color: white;
+    margin-right: 1;
 }
 
-#logout-button {
-    width: 4;
+#user-info-text {
+    width: 1fr;
+    layout: vertical;
+    align: left top;
+    overflow: hidden;
+}
+
+.user-info-name {
     height: 1;
-    min-width: 4;
+    width: 100%;
+    content-align: left middle;
+    text-overflow: ellipsis;
+    overflow: hidden;
+    text-wrap: nowrap;
+}
+
+.user-info-status {
+    height: 1;
+    color: $text-muted;
+    content-align: left middle;
+    text-overflow: ellipsis;
+    overflow: hidden;
+    text-wrap: nowrap;
+}
+
+#user-info-buttons {
+    width: auto;
+    height: 3;
+    align: right middle;
+    layout: horizontal;
+}
+
+.user-info-button {
+    width: 3;
+    height: 3;
+    min-width: 3;
     border: none;
     background: transparent;
     color: $text-muted;
     content-align: center middle;
 }
-
-#logout-button:hover {
-    color: red;
+.user-info-button:hover {
+    color: $text;
+    background: $panel;
 }
 
 #channels-title {
@@ -237,6 +278,9 @@ MainScreen {
     content-align: left middle;
     color: $text;
     text-style: bold;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-wrap: nowrap;
 }
 
 #messages-container {
@@ -411,6 +455,8 @@ MainScreen {
     background: transparent;
     border: none;
     text-overflow: ellipsis;
+    overflow: hidden;
+    text-wrap: nowrap;
 }
 
 .member-button:hover {
@@ -488,7 +534,9 @@ MainScreen {
     color: yellow;
     content-align: left middle;
     text-align: left;
+    overflow: hidden;
     text-overflow: ellipsis;
+    text-wrap: nowrap;
 }
 
 .sidebar-pending-button:hover {
@@ -510,6 +558,9 @@ MainScreen {
     width: 1fr;
     color: $text;
     content-align: left middle;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-wrap: nowrap;
 }
 
 .friend-request-card {
@@ -517,6 +568,9 @@ MainScreen {
     height: auto;
     background: transparent;
     margin-bottom: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-wrap: nowrap;
 }
 
 .friend-request-card:hover {
@@ -570,7 +624,7 @@ MainScreen {
 
 
 /* Modals */
-ServerOptionsScreen, CreateServerScreen, JoinServerScreen, InviteCodePopup, CreateChannelScreen, Attachment, DownloadScreen, UserProfileScreen, AddFriendScreen {
+ServerOptionsScreen, CreateServerScreen, JoinServerScreen, InviteCodePopup, CreateChannelScreen, Attachment, DownloadScreen, UserProfileScreen, AddFriendScreen, EditProfile {
     align: center middle;
     background: rgba(0, 0, 0, 0.4);
 }
@@ -650,6 +704,21 @@ UserProfileScreen {
     background: rgba(0, 0, 0, 0.2);
 }
 
+UserProfileScreen #screen-container {
+    width: 56;
+    height: auto;
+    max-height: 40;
+    border: double $primary;
+    background: $panel;
+    padding: 0;
+}
+
+.profile-banner {
+    width: 100%;
+    height: 3;
+}
+
+
 #profile-top-row {
     width: 100%;
     height: 3;
@@ -660,7 +729,7 @@ UserProfileScreen {
     width: 1fr;
 }
 
-.profile-close-button {
+#profile-close-button {
     width: 5;
     height: 3;
     min-width: 5;
@@ -670,7 +739,7 @@ UserProfileScreen {
     content-align: center middle;
 }
 
-.profile-close-button:hover {
+#profile-close-button:hover {
     color: red;
     background: transparent;
     border: round red;
@@ -683,34 +752,67 @@ UserProfileScreen {
     content-align: center middle;
     text-align: center;
     text-style: bold;
-    color: cyan;
+    color: white;
+    background: transparent;
+    margin: -3 0 0 2;
+    
 }
 
 .profile-name-label {
     text-style: bold;
-    text-align: left;
-    color: $text;
-    padding: 1 0;
-    width: 100%;
+    padding: 0 2;
+    margin-top: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-wrap: nowrap;
 }
 
 .profile-username-label {
-    width: 100%;
-    text-align: left;
+    padding: 0 2;
     color: $text-muted;
-    margin-bottom: 1;
+    height: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-wrap: nowrap;
+}
+
+.profile-pronouns-label {
+    padding: 0 2;
+    color: $text-muted;
+    height: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-wrap: nowrap;
 }
 
 .profile-bio-label {
-    text-align: left;
+    padding: 0 2;
     color: $text-muted;
-    margin-bottom: 1;
+}
+
+.profile-status-label {
+    padding: 0 2;
+    color: $text-muted;
+    height: 1;
+    margin-top: 1;
+}
+
+.profile-section-label {
+    color: $text-muted;
+    text-style: bold;
+    padding: 1 2 0 2;
+    height: 2;
+}
+
+.profile-connection-item {
+    padding: 0 2;
+    color: cyan;
+    height: 1;
 }
 
 .profile-member-since {
-    text-align: left;
+    padding: 1 2;
     color: $text-muted;
-    margin-bottom: 1;
 }
 
 .profile-friend-status {
@@ -719,15 +821,260 @@ UserProfileScreen {
     margin-top: 1;
 }
 
-UserProfileScreen #screen-container {
-    width: 46;
+.profile-edit-button {
+    width: 100%;
+    height: 3;
+    border: round $primary-darken-1;
+    margin: 1 2;
+    background: transparent;
+    color: cyan;
+    content-align: center middle;
 }
 
+#profile-note-input {
+    margin: 1 2 0 2;
+    width: 1fr;
+}
+
+#save-note-button {
+    height: 3;
+    margin: 0 2;
+    width: 1fr;
+}
+
+#add-friend-profile-button {
+    width: 1fr;
+    margin-top: 1;
+    height: 3;
+    border: round $primary-darken-1;
+    background: transparent;
+    text-align: center;
+}
+
+
+/* Edit Profile Screen */
+#edit-profile-container {
+    width: 100;
+    height: auto;
+    max-height: 40;
+    border: double cyan;
+    background: $panel;
+    padding: 1 2 2 2;
+    overflow-y: auto;
+}
+
+#edit-profile-header {
+    height: 4;
+    align: left middle;
+    border-bottom: solid $primary-darken-3;
+    margin-bottom: 1;
+}
+
+#edit-profile-header .screen-title {
+    width: 1fr;
+    content-align: left middle;
+    color: cyan;
+    text-style: bold;
+}
+
+
+#edit-profile-close-button {
+    width: 4;
+    height: 3;
+    min-width: 5;
+    background: transparent;
+    color: $text-muted;
+    border: round $primary-darken-1;
+    content-align: center middle;
+}
+#edit-profile-close-button:hover {
+    color: red;
+    border: round red;
+    background: transparent;
+}
+
+#edit-profile-error {
+    color: red;
+    text-align: center;
+    height: 1;
+    width: 100%;
+}
+
+#edit-profile-preview {
+    width: 100%;
+    height: 10;
+    margin-bottom: 1;
+    padding: 1 2;
+    layout: vertical;
+    align: left bottom;
+}
+
+#edit-profile-preview-avatar {
+    width: 5;
+    height: 3;
+    border: round $panel;
+    content-align: center middle;
+    text-style: bold;
+    color:white;
+    background: transparent;
+    text-align: center;
+}
+
+#edit-profile-preview-name {
+    height: 1;
+    text-style: bold;
+    margin-top: 1;
+}
+
+#edit-profile-preview-pronouns {
+    height: 1;
+    color: $text-muted;
+}
+
+.edit-profile-section-label {
+    color: $text-muted;
+    text-style: bold;
+    margin-top: 1;
+    height: 1;
+}
+
+.edit-profile-field-description {
+    color: $text-muted;
+    height: 1;
+    margin-bottom: 1;
+}
+
+.edit-profile-color-row {
+    height: 3;
+    margin-bottom: 1;
+    align: left middle;
+}
+
+.edit-profile-color-option {
+    width: 5;
+    height: 3;
+    min-width: 5;
+    border: blank;
+    background: transparent;
+    margin-right: 1;
+    content-align: center middle;
+}
+
+.edit-profile-color-option:hover {
+    border: round $primary;
+}
+
+.edit-profile-color-selected {
+    border: round cyan;
+}
+
+#name-color-white { color: white; }
+#name-color-cyan { color: cyan; }
+#name-color-green { color: green; }
+#name-color-yellow { color: yellow; }
+#name-color-magenta { color: magenta; }
+#name-color-red { color: red; }
+#name-color-blue { color: blue; }
+#name-color-bright_cyan { color: #00e5ff; }
+#name-color-bright_green { color: #69ff47; }
+#name-color-bright_yellow { color: #ffe066; }
+#name-color-bright_magenta { color: #ff6ef7; }
+#name-color-bright_red { color: #ff6b6b; }
+
+.edit-profile-accent-option {
+    width: 5;
+    height: 3;
+    min-width: 5;
+    border: blank;
+    background: transparent;
+    color: $primary;
+    content-align: center middle;
+    margin-right: 1;
+}
+
+.edit-profile-accent-option:hover {
+    border: round $primary;
+}
+
+#accent-color-dark_blue { color: #00008b; }
+#accent-color-dark_green { color: #006400; }
+#accent-color-dark_red { color: #8b0000; }
+#accent-color-dark_magenta { color: #8b008b; }
+#accent-color-dark_cyan { color: #008b8b; }
+
+#accent-color-dark_blue:hover { border: round #0000cd; }
+#accent-color-dark_green:hover { border: round #00a000; }
+#accent-color-dark_red:hover { border: round #cd0000; }
+#accent-color-dark_magenta:hover { border: round #cd00cd; }
+#accent-color-dark_cyan:hover { border: round #00cdcd; }
+
+.edit-profile-accent-option.edit-profile-color-selected {
+    border: round cyan;
+}
+
+.accent-dark_blue    {
+    background: #00008b;
+    border: tall #0000cd;
+}
+.accent-dark_green   {
+    background: #006400;
+    border: tall #00a000;
+}
+.accent-dark_red     {
+    background: #8b0000;
+    border: tall #cd0000;
+}
+.accent-dark_magenta {
+    background: #8b008b;
+    border: tall #cd00cd;
+}
+.accent-dark_cyan    {
+    background: #008b8b;
+    border: tall #00cdcd;
+}
+
+.edit-profile-connection-row {
+    height: 3;
+    margin-bottom: 1;
+    align: left middle;
+}
+
+.edit-profile-connection-label-input {
+    width: 20;
+    height: 3;
+    margin-right: 1;
+}
+
+.edit-profile-connection-url-input {
+    width: 1fr;
+    height: 3;
+}
+
+#edit-profile-buttons {
+    margin-top: 2;
+    height: auto;
+    align: right middle;
+}
+
+#edit-profile-buttons Button {
+    width: auto;
+    min-width: 20;
+    margin-left: 1;
+}
+
+
+
+/* DM Panel */
 .dm-user-panel {
     width: 100%;
     height: 100%;
     padding: 1 1;
     align: left top;
+}
+
+.dm-panel-banner {
+    width: 100%;
+    height: 4;
 }
 
 .dm-panel-avatar {
@@ -737,7 +1084,8 @@ UserProfileScreen #screen-container {
     content-align: center middle;
     text-align: center;
     text-style: bold;
-    color: cyan;
+    color: white;
+    margin: -3 0 0 1;
 }
 
 .dm-panel-name {
@@ -745,26 +1093,48 @@ UserProfileScreen #screen-container {
     text-align: left;
     text-style: bold;
     color: $text;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-wrap: nowrap;
 }
 
 .dm-panel-username {
     width: 100%;
     text-align: left;
     color: $text-muted;
-    margin-bottom: 1;
-    /* finish */
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-wrap: nowrap;
+}
+
+.dm-panel-pronouns {
+    width: 100%;
+    text-align: left;
+    color: $text-muted;
+}
+
+.dm-panel-status {
+    width: 100%;
+    text-align: left;
+    color: $text-muted;
+    margin-top: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-wrap: nowrap;
+}
+
+.dm-panel-section-label {
+    color: $text-muted;
+    text-style: bold;
+    padding: 0 1;
+    margin-top: 1;
+    height: 1;
 }
 
 .dm-panel-bio {
     width: 100%;
     text-align: left;
-    color: $text-muted;
-    margin-bottom: 1;
-}
-
-#profile-member-since {
-    text-align: left;
-    color: $text-muted;
+    color: $text;
     margin-bottom: 1;
 }
 
@@ -779,7 +1149,7 @@ UserProfileScreen #screen-container {
     width: 100%;
     height: auto;
     dock: bottom;
-    padding-bottom: 1;
+    layout: vertical;
 }
 
 .dm-panel-profile-button {
@@ -787,12 +1157,12 @@ UserProfileScreen #screen-container {
     height: 3;
     border: round $primary-darken-1;
     background: transparent;
-    color: cyan;
     content-align: center middle;
 }
 
 .dm-panel-profile-button:hover {
     border: round cyan;
+    color: cyan;
 }
 
 .dm-panel-remove-button {
@@ -802,11 +1172,10 @@ UserProfileScreen #screen-container {
     background: transparent;
     color: $error;
     content-align: center middle;
-    margin-top: 1;
 }
 
 .dm-panel-remove-button:hover {
-    border: round $error;
+    border: round $error-darken-2;
     color: $error-darken-2;
 }
 
