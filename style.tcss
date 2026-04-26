@@ -345,6 +345,17 @@ MainScreen {
     margin-top: 0;
 }
 
+.compact-mode-message {
+    height: auto;
+    margin-bottom: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+}
+
+.compact-mode {
+    padding: 0 1;
+}
+
 .message-header {
     height: 1;
     color: $text;
@@ -392,6 +403,27 @@ MainScreen {
 .download-button:hover {
     border: none;
     color: cyan;
+    background: transparent;
+}
+
+.attachment-image {
+    width: auto;
+    height: 18;
+    margin-top: 1;
+    margin-bottom: 0;
+}
+
+.attachment-image-card {
+    margin-top: 0;
+    margin-bottom: 1;
+    padding: 0 1;
+    height: auto;
+    background: transparent;
+    border: none;
+}
+
+.attachment-image-card:hover {
+    border: none;
     background: transparent;
 }
 
@@ -624,7 +656,7 @@ MainScreen {
 
 
 /* Modals */
-ServerOptionsScreen, CreateServerScreen, JoinServerScreen, InviteCodePopup, CreateChannelScreen, Attachment, DownloadScreen, UserProfileScreen, AddFriendScreen, EditProfile {
+ServerOptionsScreen, CreateServerScreen, JoinServerScreen, InviteCodePopup, CreateChannelScreen, Attachment, DownloadScreen, UserProfileScreen, AddFriendScreen, EditProfile, SettingsScreen {
     align: center middle;
     background: rgba(0, 0, 0, 0.4);
 }
@@ -670,6 +702,8 @@ ServerOptionsScreen, CreateServerScreen, JoinServerScreen, InviteCodePopup, Crea
 #screen-buttons Button {
     width: 1fr;
     height: auto;
+    margin-right: 1;
+    margin-left: 1;
 }
 
 #cancel-button {
@@ -1237,4 +1271,176 @@ UserProfileScreen #screen-container {
 .search-result-content {
     color: $text;
     width: 100%;
+}
+
+
+/* Settings */
+#settings-container {
+    width: 120;
+    height: 42;
+    border: double cyan;
+    background: $panel;
+    layout: horizontal;
+}
+
+.settings-title {
+    color: cyan;
+    height: 1;
+    padding: 0 1;
+    margin-bottom: 1;
+    text-style: bold;
+}
+
+#settings-navigation {
+    width: 28;
+    background: $panel-darken-1;
+    border-right: solid $primary-darken-3;
+    layout: vertical;
+    padding: 1 1;
+}
+
+.settings-navigation-item {
+    width: 100%;
+    height: 3;
+    border: none;
+    background: transparent;
+    color: $text-muted;
+    content-align: left middle;
+    text-align: left;
+    padding: 0 2;
+}
+
+.settings-selection-label {
+    color: $text-muted;
+    text-style: bold;
+    padding: 0 1;
+    margin-top: 1;
+    height: 1;
+}
+
+.settings-navigation-item:hover {
+    background: $panel;
+    color: $text;
+}
+
+.settings-navigation-active {
+    background: $panel;
+    color: cyan;
+    text-style: bold;
+}
+
+#settings-close-button {
+    width: 100%;
+    height: 3;
+    border: none;
+    background: transparent;
+    color: $text-muted;
+    content-align: left middle;
+    text-align: left;
+    padding: 0 2;
+    dock: bottom;
+}
+
+#settings-close-button:hover {
+    color: $error;
+    background: transparent;
+}
+
+.settings-content {
+    width: 1fr;
+    height: 100%;
+    padding: 2 3;
+}
+
+.settings-section-title {
+    color: cyan;
+    text-style: bold;
+    height: 2;
+    width: 100%;
+    border-bottom: solid $primary-darken-3;
+    margin-bottom: 1;
+}
+
+.settings-space {
+    width: 100%;
+    layout: vertical;
+    padding-bottom: 2;
+    margin-bottom: 1;
+    border-bottom: solid $primary-darken-3;
+    height: auto;
+}
+
+.settings-space Input {
+    margin-bottom: 1;
+}
+
+
+.settings-section-label {
+    color: $text-muted;
+    text-style: bold;
+    margin-bottom: 1;
+}
+
+.settings-section-description {
+    color: $text-muted;
+    margin-bottom: 1;
+}
+
+.settings-row {
+    width: 100%;
+    height: 5;
+    align: left middle;
+    layout: horizontal;
+}
+
+.settings-row-text {
+    width: 1fr;
+    height: 5;
+    layout: vertical;
+    align: left middle;
+}
+
+.settings-row-description {
+    color: $text-muted;
+}
+
+.settings-row-label {
+    color: $text;
+}
+
+.settings-toggle {
+    width: 8;
+    height: 3;
+    min-width: 8;
+    border: round $primary-darken-1;
+    background: transparent;
+    color: $text-muted;
+    content-align: center middle;
+}
+
+.settings-toggle-on {
+    border: round cyan;
+    color: cyan;
+}
+
+.settings-toggle:hover {
+    border: round $primary;
+    color: $text;
+}
+
+.settings-error-label {
+    color: $error;
+    margin-top: 1;
+    margin-bottom: 1;
+}
+
+.settings-delete-buttons {
+    margin-top: 1;
+    height: 3;
+}
+
+.settings-delete-buttons Button {
+    width: auto;
+    min-width: 18;
+    margin-right: 1;
 }

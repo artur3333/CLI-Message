@@ -85,7 +85,7 @@ def logout():
 
     return True, "You have been logged out."
 
-'''
+
 def delete_account(password):
     global current_user
 
@@ -124,6 +124,30 @@ def change_password(old_password, new_password):
     return True, "Password changed successfully."
 
 
+def change_username(new_username):
+    global current_user
+
+    if not is_logged():
+        return False, "No user is currently logged in."
+    
+    valid, error = validate_username(new_username)
+    if not valid:
+        return False, error
+    
+    if new_username == current_user["username"]:
+        return False, "It's already your username. Baka~"
+    
+    exist = db.get_user_by_username(new_username)
+    if exist:
+        return False, "Username is already taken."
+    
+    db.update_user(current_user["id"], username=new_username)
+    current_user = db.get_user_by_id(current_user["id"])
+
+    return True, "Username changed successfully."
+
+
+'''
 def validate_session():
     global current_user, current_token
 

@@ -121,12 +121,20 @@ def init_db():
                    "last_read_message_id INTEGER DEFAULT 0, " \
                    "PRIMARY KEY (user_1, user_2, user_id))")
     
+    # user notes
     cursor.execute("CREATE TABLE IF NOT EXISTS user_notes (" \
                    "by_id INTEGER NOT NULL, " \
                    "target_id INTEGER NOT NULL, " \
                    "content TEXT NOT NULL, " \
                    "created INTEGER NOT NULL, " \
                    "PRIMARY KEY (by_id, target_id))")
+    
+    # settings
+    cursor.execute("CREATE TABLE IF NOT EXISTS settings (" \
+                   "user_id INTEGER PRIMARY KEY, " \
+                   "dm_notifications INTEGER DEFAULT 1, " \
+                   "mention_notifications INTEGER DEFAULT 1, " \
+                   "compact_mode INTEGER DEFAULT 0)")
     
     connection.commit()
     connection.close()
@@ -228,6 +236,57 @@ def delete_session(token):
         return False
     
 
+def change_user_password(user_id, new_password):
+    password_hash, password_salt = hash_password(new_password)
+
+    connection = connect_db()
+    cursor = connection.cursor()
+
+    try:
+        cursor.execute("UPDATE users SET password_hash = ?, password_salt = ? WHERE id = ?",
+                       (password_hash, password_salt, user_id))
+        connection.commit()
+        connection.close()
+
+        return True
+    
+    except Exception as e:
+        connection.close()
+        return False
+    
+
+def delete_user(user_id):
+    connection = connect_db()
+    cursor = connection.cursor()
+
+    try:
+        cursor.execute("DELETE FROM users WHERE id = ?",
+                       (user_id,))
+        connection.commit()
+        connection.close()
+
+        return True
+
+    except Exception as e:
+        connection.close()
+        return False
+    
+def delete_user_sessions(user_id):
+    connection = connect_db()
+    cursor = connection.cursor()
+
+    try:
+        cursor.execute("DELETE FROM sessions WHERE user_id = ?",
+                       (user_id,))
+        connection.commit()
+        connection.close()
+        return True
+    
+    except Exception as e:
+        connection.close()
+        return False
+
+
 def update_user(user_id, **kwargs):
     connection = connect_db()
     cursor = connection.cursor()
@@ -305,7 +364,7 @@ def set_user_note(by_id, target_id, content):
         connection.commit()
         connection.close()
 
-        return True
+        return True, "Note saved successfully."
     
     except Exception as e:
         connection.close()
@@ -374,7 +433,6 @@ def get_server_by_id(server_id):
 
 
 def get_server_by_invite_code(invite_code):
-    print(f"Looking for server with invite code: '{invite_code}'")
     connection = connect_db()
     cursor = connection.cursor()
 
@@ -778,7 +836,7 @@ def mark_channel_read(user_id, channel_id, last_id):
             connection.commit()
             connection.close()
 
-            return True
+            return True, ""
     
         except Exception as e:
             connection.close()
@@ -791,7 +849,7 @@ def mark_channel_read(user_id, channel_id, last_id):
             connection.commit()
             connection.close()
 
-            return True
+            return True, ""
         
         except Exception as e:
             connection.close()
@@ -825,7 +883,7 @@ def get_server_unread_count(user_id, server_id):
 
     if not cursor.execute("SELECT * FROM server_members WHERE server_id = ? AND user_id = ?",
                           (server_id, user_id)).fetchone():
-        connection.cursor.close()
+        connection.close()
         return 0
 
     cursor.execute("SELECT id FROM channels WHERE server_id = ?",
@@ -874,7 +932,7 @@ def mark_dm_read(user_id1, user_id2, last_id):
             connection.commit()
             connection.close()
 
-            return True
+            return True, ""
     
         except Exception as e:
             connection.close()
@@ -887,7 +945,7 @@ def mark_dm_read(user_id1, user_id2, last_id):
             connection.commit()
             connection.close()
 
-            return True
+            return True, ""
         
         except Exception as e:
             connection.close()
@@ -927,4 +985,48 @@ def get_all_dm_unreads(user_id):
         result[friend["id"]] = get_dm_unread_count(user_id, friend["id"])
 
     return result
-        
+
+
+def get_user_settings(user_id):
+    connection = connect_db()
+    cursor = connection.cursor()
+
+    cursor.execute("SELECT * FROM settings WHERE user_id = ?",
+                   (user_id,))
+    row = cursor.fetchone()
+    if row is None:
+        cursor.execute("INSERT INTO settings (user_id) VALUES (?)",
+                       (user_id,))
+        connection.commit()
+
+        cursor.execute("SELECT * FROM settings WHERE user_id = ?",
+                       (user_id,))
+        row = cursor.fetchone()
+
+    connection.close()
+
+    return dict(row)
+
+
+def update_settings(user_id, setting, value):
+    connection = connect_db()
+    cursor = connection.cursor()
+
+    allowed_settings = ["dm_notifications", "mention_notifications", "compact_mode"]
+    if setting not in allowed_settings:
+        connection.close()
+        return False, "Invalid setting."
+    
+    get_user_settings(user_id)
+
+    try:
+        cursor.execute(f"UPDATE settings SET {setting} = ? WHERE user_id = ?",
+                       (value, user_id))
+        connection.commit()
+        connection.close()
+
+        return True, f"{setting} updated successfully."
+    
+    except Exception as e:
+        connection.close()
+        return False, f"Error: {str(e)}"

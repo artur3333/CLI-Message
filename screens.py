@@ -1,7 +1,9 @@
 import os
 import re
+import io
 import json
 from datetime import datetime
+from PIL import Image as PImage
 
 from rich.text import Text
 from textual.app import ComposeResult
@@ -9,6 +11,7 @@ from textual.screen import Screen, ModalScreen
 from textual.widgets import Input, Button, Static, Label
 from textual.widget import Widget
 from textual.containers import Horizontal, Container, ScrollableContainer
+from textual_image.widget import Image as TImage
 
 import auth
 import db
@@ -78,6 +81,12 @@ class MainScreen(Screen):
 
         self.loading_members = False
 
+        user = auth.get_current_user()
+        settings = db.get_user_settings(user["id"])
+        self.dm_notifications = bool(settings.get("dm_notifications", 1))
+        self.mention_notifications = bool(settings.get("mention_notifications", 1))
+        self.compact_mode = bool(settings.get("compact_mode", 0))
+
     def compose(self) -> ComposeResult:
 
         with Container(id="servers-container"):
@@ -99,7 +108,7 @@ class MainScreen(Screen):
                     yield Label("", id="user-info-status")
 
                 with Horizontal(id = "user-info-buttons"):
-                    yield Button("M", id="edit-profile-button", classes="user-info-button")
+                    yield Button("S", id="settings-button", classes="user-info-button")
                     yield Button("L", id="logout-button", classes="user-info-button")
 
         with Container(id="chat-container"):
@@ -138,6 +147,7 @@ class MainScreen(Screen):
         self.set_interval(1, self.refresh_messages)
         self.set_interval(1, self.refresh_notifications)
         self.set_interval(1, self.refresh_badges)
+        self.set_interval(5, self.refresh_members)
 
 
     async def refresh_user_info(self, user):
@@ -152,9 +162,6 @@ class MainScreen(Screen):
 
 
     async def refresh_messages(self):
-        if self.active_server:
-            await self.load_members(self.active_server["id"])
-
         if self.active_mode == "dm":
             if not self.active_dm_user:
                 return
@@ -165,6 +172,9 @@ class MainScreen(Screen):
             if not self.active_channel:
                 return
             messages = db.get_messages_after(self.active_channel["id"], self.last_message_id)
+
+        else:
+            return
         
         if not messages:
             return
@@ -180,7 +190,7 @@ class MainScreen(Screen):
                 prev = None
 
             compact = should_compact(prev, message)
-            await self.query_one("#messages-container").mount(Message(message, compact=compact))
+            await self.query_one("#messages-container").mount(Message(message, compact=compact, compact_mode=self.compact_mode))
             prev = message
             
         self.last_message_previous = prev
@@ -223,9 +233,13 @@ class MainScreen(Screen):
                     if message["sender_id"] == user["id"]:
                         continue
                         
-                    mentions = re.findall(r"@(\w+)", message["content"])
-                    if user["username"] in mentions:
-                        self.notify(f"{message["username"]} mentioned you in #{channel["name"]} in {server['name']}", title="Mention", severity="warning")
+                    lower_mentions = []
+                    for mention in re.findall(r"@(\w+)", message["content"]):
+                        lower_mentions.append(mention.lower())
+                        
+                    if user["username"] in lower_mentions:
+                        if self.mention_notifications == True:
+                            self.notify(f"{message["username"]} mentioned you in #{channel["name"]} in {server['name']}", title="Mention", severity="warning")
 
                 self.global_channel_last_ids[channel["id"]] = messages[-1]["id"]
 
@@ -251,8 +265,9 @@ class MainScreen(Screen):
             for message in messages:
                 if message["sender_id"] == user["id"]:
                     continue
-
-                self.notify(f"New message from @{message['username']}", title="DM")
+                
+                if self.dm_notifications == True:
+                    self.notify(f"New message from @{message['username']}", title="DM")
 
             self.global_dm_last_ids[f] = messages[-1]["id"]
 
@@ -314,6 +329,12 @@ class MainScreen(Screen):
 
                 except Exception as e:
                     pass
+
+
+    async def refresh_members(self):
+        if self.active_server and not self.search_active:
+            await self.load_members(self.active_server["id"])
+
 
 
     async def load_servers(self):
@@ -407,7 +428,7 @@ class MainScreen(Screen):
                 prev = None
 
             compact = should_compact(prev, message)
-            await self.query_one("#messages-container").mount(Message(message, compact=compact))
+            await self.query_one("#messages-container").mount(Message(message, compact=compact, compact_mode=self.compact_mode))
             prev = message
 
         if messages:
@@ -444,7 +465,7 @@ class MainScreen(Screen):
                 prev = None
 
             compact = should_compact(prev, message)
-            await self.query_one("#messages-container").mount(Message(message, compact=compact))
+            await self.query_one("#messages-container").mount(Message(message, compact=compact, compact_mode=self.compact_mode))
             prev = message
 
         if messages:
@@ -701,16 +722,17 @@ class MainScreen(Screen):
         attachment_name = None
         if attachment_path:
             try:
+                if os.path.getsize(attachment_path) > 50 * 1024 * 1024: # 50 MB
+                    self.notify("Attachment is too large. Max size is 50 MB.", title="Error")
+                    return
+                
                 with open(attachment_path, "rb") as file:
                     attachment_data = file.read()
-
-                    if len(attachment_data) > 50 * 1024 * 1024: # 50 MB
-                        self.notify("Attachment is too large. Max size is 50 MB.", title="Error")
-                        return
 
                 attachment_name = os.path.basename(attachment_path)
             
             except Exception as e:
+                self.notify(f"Failed to read attachment: {str(e)}", title="Error")
                 pass
 
         if self.active_mode == "dm":
@@ -745,7 +767,7 @@ class MainScreen(Screen):
                 prev = None
 
             compact = should_compact(prev, message)
-            await self.query_one("#messages-container").mount(Message(message, compact=compact))
+            await self.query_one("#messages-container").mount(Message(message, compact=compact, compact_mode=self.compact_mode))
             prev = message
             
         self.last_message_previous = prev
@@ -764,7 +786,7 @@ class MainScreen(Screen):
         self.pending_attachment = None
         self.query_one("#attach-button", Button).label = "+"
 
-        if self.active_mode == "dm" and self.active_dm_user: #! idk
+        if self.active_mode == "dm" and self.active_dm_user:
             self.query_one("#message-input", Input).placeholder = f"Message @{self.active_dm_user['username']}..."
 
         else:
@@ -772,6 +794,9 @@ class MainScreen(Screen):
 
 
     async def search(self, query):
+        while self.loading_members:
+            await self.sleep(0)
+
         members_list = self.query_one("#members-list")
         user = auth.get_current_user()
         query = query.strip()
@@ -947,9 +972,9 @@ class MainScreen(Screen):
             else:
                 self.notify(result, title="Error")
 
-        elif button_id == "edit-profile-button":
+        elif button_id == "settings-button":
             user = auth.get_current_user()
-            self.app.push_screen(EditProfile(user), self.after_profile_edit)
+            self.app.push_screen(SettingsScreen(user, self.dm_notifications, self.mention_notifications, self.compact_mode), self.after_settings_closed)
 
         elif button_id == "logout-button":
             auth.logout()
@@ -1045,13 +1070,35 @@ class MainScreen(Screen):
         else:
             return
         
-    async def after_profile_edit(self, result):
-        if result:
-            user = auth.get_current_user()
-            auth.current_user = db.get_user_by_id(user["id"])
-            await self.refresh_user_info(db.get_user_by_id(user["id"]))
+    # async def after_profile_edit(self, result):
+    #     if result:
+    #         user = auth.get_current_user()
+    #         auth.current_user = db.get_user_by_id(user["id"])
+    #         await self.refresh_user_info(db.get_user_by_id(user["id"]))
             
-            self.notify("Profile updated", title="Profile")
+    #         self.notify("Profile updated", title="Profile")
+
+    async def after_settings_closed(self, result):
+        if not result:
+            return
+        
+        if result == "delete":
+            self.app.pop_screen()
+            return
+        
+        self.dm_notifications = result.get("dm_notifications", self.dm_notifications)
+        self.mention_notifications = result.get("mention_notifications", self.mention_notifications)
+        self.compact_mode = result.get("compact_mode", self.compact_mode)
+
+        user = auth.get_current_user()
+        db.update_settings(user["id"], "dm_notifications", int(self.dm_notifications))
+        db.update_settings(user["id"], "mention_notifications", int(self.mention_notifications))
+        db.update_settings(user["id"], "compact_mode", int(self.compact_mode))
+
+        new = db.get_user_by_id(user["id"])
+        await self.refresh_user_info(new)
+
+        self.notify("Settings updated", title="Settings")
 
 
 
@@ -1066,39 +1113,62 @@ class DaySeparator(Widget):
 
 
 class Message(Widget):
-    def __init__(self, message, compact=False):
+    def __init__(self, message, compact=False, compact_mode=False):
         super().__init__()
         self.message = message
         self.compact = compact
+        self.compact_mode = compact_mode
         self.add_class("message")
+
         if self.compact:
             self.add_class("compact-message")
+        
+        if self.compact_mode:
+            self.add_class("compact-mode-message")
 
     def compose(self) -> ComposeResult:
         name = get_display_name_markup(self.message)
 
         time = format_timestamp(self.message["created"])
 
-        if not self.compact:
-            head = f"{name} [dim][{time}][/dim]"
-            yield Static(Text.from_markup(head), classes="message-head")
-
         current_user = auth.get_current_user()
         highlighted_content = highlight_mention(self.message["content"], current_user["username"])
 
-        yield Static(highlighted_content, markup=True, classes="message-content")
+        if self.compact_mode:
+            message = f"{name} [dim][{time}][/dim]: {highlighted_content}"
+            yield Static(Text.from_markup(message), markup=True, classes="message-content compact-mode")
+        
+        else:
+            if not self.compact:
+                head = f"{name} [dim][{time}][/dim]"
+                yield Static(Text.from_markup(head), classes="message-head")
+
+            yield Static(highlighted_content, markup=True, classes="message-content")
+
 
         if self.message.get("attachment_name"):
             filename = os.path.basename(self.message["attachment_name"])
             extension = os.path.splitext(filename)[1].lower()
-            if extension in [".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp"]:
-                sub = "Image Attachment" #TODO: maybe show image preview?
-            else:
-                sub = "Attachment"
+            if extension in [".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp"] and self.message.get("attachment_data"):
+                try:
+                    raw = self.message.get("attachment_data")
+                    pil_image = PImage.open(io.BytesIO(raw))
+                    pil_image.load()
+                    yield TImage(pil_image, classes="attachment-image")
 
-            with Horizontal(classes="attachment-card"):
-                yield Static(f"{sub} [bold]{filename}[/bold]", markup=True, classes="attachment-label")
-                yield Button("↓", id=f"download-{self.message['id']}", classes="download-button")
+                except Exception as e:
+                    with Horizontal(classes="attachment-card"):
+                        yield Static(f"Image Attachment: [bold]{filename}[/bold]", markup=True, classes="attachment-label")
+                        yield Button("↓", id=f"download-{self.message['id']}", classes="download-button")
+            else:
+                with Horizontal(classes="attachment-card"):
+                    yield Static(f"Attachment: [bold]{filename}[/bold]", markup=True, classes="attachment-label")
+                    yield Button("↓", id=f"download-{self.message['id']}", classes="download-button")
+
+            if extension in [".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp"] and self.message.get("attachment_data"):
+                with Horizontal(classes="attachment-card attachment-image-card"):
+                    yield Static(f"[dim]{filename}[/dim]", markup=True, classes="attachment-label")
+                    yield Button("↓", id=f"download-{self.message['id']}", classes="download-button")
 
 
 class Attachment(ModalScreen):
@@ -1168,6 +1238,7 @@ class DownloadScreen(ModalScreen):
                 with open(destination_path, "wb") as file:
                     file.write(self.data)
 
+                self.app.notify(f"Attachment downloaded to {destination_path}", title="Download Complete")
                 self.dismiss(destination_path)
             
             except Exception as e:
@@ -1488,7 +1559,7 @@ class EditProfile(ModalScreen):
                 yield Button("Cancel", id="edit-profile-cancel-button")
 
     
-    def on_button_pressed(self, event: Button.Pressed):
+    async def on_button_pressed(self, event: Button.Pressed):
         button_id = event.button.id
         if button_id and button_id.startswith("name-color-"):
             color = button_id.split("name-color-", 1)[1]
@@ -1553,7 +1624,219 @@ class EditProfile(ModalScreen):
                 error.remove_class("hidden")
                 error.update(result)
 
+
+class SettingsScreen(ModalScreen):
+    def __init__(self, user, dm_notifications, mention_notifications, compact_mode):
+        super().__init__()
+        self.user = user
+        self.active_tab = "account"
+        self.dm_notifications = dm_notifications
+        self.mention_notifications = mention_notifications
+        self.compact_mode = compact_mode
+
+    def compose(self) -> ComposeResult:
+        with Container(id="settings-container"):
+            with Container(id="settings-navigation"):
+                yield Label("Settings", classes="settings-title")
+                yield Button("Account", id="settings-navigation-account", classes="settings-navigation-item settings-navigation-active")
+                yield Button("Notifications", id="settings-navigation-notifications", classes="settings-navigation-item")
+                yield Button("Appearance", id="settings-navigation-appearance", classes="settings-navigation-item")
+                yield Button("Close", id="settings-close-button")
+
+            with ScrollableContainer(id="settings-content-account", classes="settings-content"):
+                yield Label("ACCOUNT", classes="settings-section-title")
+
+                with Container(classes="settings-space"):
+                    yield Label("PROFILE", classes="settings-section-label")
+                    yield Static("Edit your profile information, including display name, pronouns, bio, status, name color, accent color, and connected accounts.", classes="settings-section-description")
+                    yield Button("Edit Profile", id=f"member-{self.user['id']}", variant="primary")
+
+                with Container(classes="settings-space"):
+                    yield Label("CHANGE USERNAME", classes="settings-section-label")
+                    yield Label("Username", classes="field-label")
+                    yield Input(value=self.user.get("username", ""), id="settings-username-input")
+                    yield Label("", id="settings-username-error", classes="hidden settings-error-label")
+                    yield Button("Change Username", id="settings-change-username-button", variant="primary")
+
+                with Container(classes="settings-space"):
+                    yield Label("CHANGE PASSWORD", classes="settings-section-label")
+                    yield Label("Current Password", classes="field-label")
+                    yield Input(placeholder="••••••••", password=True, id="settings-current-password-input")
+                    yield Label("New Password", classes="field-label")
+                    yield Input(placeholder="••••••••", password=True, id="settings-new-password-input")
+                    yield Label("", id="settings-password-error", classes="hidden settings-error-label")
+                    yield Button("Change Password", id="settings-change-password-button", variant="primary")
+
+                with Container(classes="settings-space"):
+                    yield Label("DANGER ZONE", classes="settings-section-label")
+                    yield Static("Delete your account permanently. (after clicking you will be asked to confirm)", classes="settings-section-description")
+                    yield Button("Delete Account", id="settings-delete-account-button", variant="error")
+
+                with Container(id="settings-delete-confirmation", classes="settings-space hidden"):
+                    yield Label("Confirm Account Deletion", classes="settings-section-label")
+                    yield Label("Enter your password to confirm:", classes="field-label")
+                    yield Input(placeholder="••••••••", password=True, id="settings-delete-password-input")
+                    yield Label("", id="settings-delete-error", classes="hidden settings-error-label")
+                    with Horizontal(classes="settings-delete-buttons"):
+                        yield Button("Confirm Deletion", id="settings-confirm-delete-button", variant="error")
+                        yield Button("Cancel", id="settings-cancel-delete-button")
+                    
+            with ScrollableContainer(id="settings-content-notifications", classes="settings-content hidden"):
+                yield Label("NOTIFICATIONS", classes="settings-section-title")
+
+                with Container(classes="settings-space"):
+                    yield Label("MESSAGE NOTIFICATIONS", classes="settings-section-label")
+                    
+                    with Horizontal(classes="settings-row"):
+                        with Container(classes="settings-row-text"):
+                            yield Label("Direct Messages Notifications", classes="settings-row-label")
+                            yield Static("Get notified for new messages in your DMs.", classes="settings-row-description")
+                        yield Button("On" if self.dm_notifications else "Off", id="settings-toggle-dm", classes="settings-toggle" + (" settings-toggle-on" if self.dm_notifications else "")) 
+
+                    with Horizontal(classes="settings-row"):
+                        with Container(classes="settings-row-text"):
+                            yield Label("Mention Notifications", classes="settings-row-label")
+                            yield Static("Get notified when someone mentions you in a server.", classes="settings-row-description")
+                        yield Button("On" if self.mention_notifications else "Off", id="settings-toggle-mention", classes="settings-toggle" + (" settings-toggle-on" if self.mention_notifications else ""))                    
+
+            with ScrollableContainer(id="settings-content-appearance", classes="settings-content hidden"):
+                yield Label("APPEARANCE", classes="settings-section-title")
+
+                with Container(classes="settings-space"):
+                    yield Label("CHAT APPEARANCE", classes="settings-section-label")
+
+                    with Horizontal(classes="settings-row"):
+                        with Container(classes="settings-row-text"):
+                            yield Label("Compact Mode", classes="settings-row-label")
+                            yield Static("Messages will show with a more compact layout.", classes="settings-row-description")
+                        yield Button("On" if self.compact_mode else "Off", id="settings-toggle-compact", classes="settings-toggle" + (" settings-toggle-on" if self.compact_mode else ""))
+                    
+                    
+    def switch_tab(self, tab):
+        for tabb in ["account", "notifications", "appearance"]:
+            content = self.query_one(f"#settings-content-{tabb}")
+            nav_button = self.query_one(f"#settings-navigation-{tabb}", Button)
+            if tabb == tab:
+                content.remove_class("hidden")
+                nav_button.add_class("settings-navigation-active")
                 
+            else:
+                content.add_class("hidden")
+                nav_button.remove_class("settings-navigation-active")
+            
+            self.active_tab = tab
+    
+    def on_button_pressed(self, event: Button.Pressed):
+        button_id = event.button.id
+
+        if button_id == "settings-navigation-account":
+            self.switch_tab("account")
+        elif button_id == "settings-navigation-notifications":
+            self.switch_tab("notifications")
+        elif button_id == "settings-navigation-appearance":
+            self.switch_tab("appearance")
+        
+        elif button_id == "settings-close-button":
+            self.dismiss({"dm_notifications": self.dm_notifications, "mention_notifications": self.mention_notifications, "compact_mode": self.compact_mode})
+
+        elif button_id and button_id.startswith("member-"):
+            user_id = button_id.split("-", 1)[1]
+            if user_id == str(auth.get_current_user()["id"]):
+                user = db.get_user_by_id(auth.get_current_user()["id"])
+                self.app.push_screen(EditProfile(user), self.after_profile_edit)
+
+        elif button_id == "settings-change-username-button":
+            new_username = self.query_one("#settings-username-input", Input).value.strip().lstrip("@")
+            success, result = auth.change_username(new_username)
+            error = self.query_one("#settings-username-error", Label)
+            if success:
+                self.query_one("#settings-username-error", Label).update("")
+                self.query_one("#settings-username-error", Label).add_class("hidden")
+                self.after_username_edit(True)
+
+            else:
+                error.update(result)
+                error.remove_class("hidden")
+            
+        elif button_id == "settings-change-password-button":
+            old_password = self.query_one("#settings-current-password-input", Input).value
+            new_password = self.query_one("#settings-new-password-input", Input).value
+            success, result = auth.change_password(old_password, new_password)
+            error = self.query_one("#settings-password-error", Label)
+            if success:
+                self.notify("Password changed successfully", title="Password")
+                self.query_one("#settings-password-error", Label).update("")
+                self.query_one("#settings-password-error", Label).add_class("hidden")
+
+            else:
+                error.update(result)
+                error.remove_class("hidden")
+
+        elif button_id == "settings-delete-account-button":
+            self.query_one("#settings-delete-confirmation", Container).remove_class("hidden")
+        
+        elif button_id == "settings-cancel-delete-button":
+            self.query_one("#settings-delete-confirmation", Container).add_class("hidden")
+            self.query_one("#settings-delete-password-input", Input).value = ""
+            self.query_one("#settings-delete-error", Label).update("")
+            self.query_one("#settings-delete-error", Label).add_class("hidden")
+
+        elif button_id == "settings-confirm-delete-button":
+            password = self.query_one("#settings-delete-password-input", Input).value
+            success, result = auth.delete_account(password)
+            error = self.query_one("#settings-delete-error", Label)
+            if success:
+                self.dismiss("delete")
+            else:
+                error.update(result)
+                error.remove_class("hidden")
+
+        elif button_id == "settings-toggle-dm":
+            self.dm_notifications = not self.dm_notifications
+            if self.dm_notifications:
+                event.button.label = "On"
+                event.button.add_class("settings-toggle-on")
+            else:
+                event.button.label = "Off"
+                event.button.remove_class("settings-toggle-on")
+        
+        elif button_id == "settings-toggle-mention":
+            self.mention_notifications = not self.mention_notifications
+            if self.mention_notifications:
+                event.button.label = "On"
+                event.button.add_class("settings-toggle-on")
+            else:
+                event.button.label = "Off"
+                event.button.remove_class("settings-toggle-on")
+
+        elif button_id == "settings-toggle-compact":
+            self.compact_mode = not self.compact_mode
+            if self.compact_mode:
+                event.button.label = "On"
+                event.button.add_class("settings-toggle-on")
+            else:
+                event.button.label = "Off"
+                event.button.remove_class("settings-toggle-on")
+
+    async def after_profile_edit(self, result):
+        if result:
+            user = auth.get_current_user()
+            auth.current_user = db.get_user_by_id(user["id"])
+            main = next(s for s in self.app.screen_stack if isinstance(s, MainScreen))
+            await main.refresh_user_info(db.get_user_by_id(user["id"]))
+            
+            self.notify("Profile updated", title="Profile")
+
+    async def after_username_edit(self, result):
+        if result:
+            user = auth.get_current_user()
+            auth.current_user = db.get_user_by_id(user["id"])
+            main = next(s for s in self.app.screen_stack if isinstance(s, MainScreen))
+            await main.refresh_user_info(db.get_user_by_id(user["id"]))
+            
+            self.notify("Username updated", title="Username")
+
+
 
 class ServerOptionsScreen(ModalScreen):
     def compose(self) -> ComposeResult:
@@ -1580,7 +1863,7 @@ class CreateServerScreen(ModalScreen):
             yield Label("", id="screen-error")
             yield Label("Server Name", classes="field-label")
             yield Input(placeholder="Enter server name...", id="server-name-input")
-            yield Label("Icon (emoji or single character) - optional", classes="field-label")
+            yield Label("Icon (single character) - optional", classes="field-label")
             yield Input(placeholder="Enter icon...", id="server-icon-input")
             yield Label("Description - optional", classes="field-label")
             yield Input(placeholder="Enter description...", id="server-description-input")
