@@ -35,6 +35,7 @@ def init_db():
                    "name_color TEXT DEFAULT '', " \
                    "accent_color TEXT DEFAULT 'dark_blue', " \
                    "connections TEXT DEFAULT '[]', " \
+                   "presence TEXT DEFAULT 'online', " \
                    "is_banned INTEGER DEFAULT 0, " \
                    "ban_reason TEXT DEFAULT '', " \
                    "login_attempts INTEGER DEFAULT 0, " \
@@ -134,7 +135,9 @@ def init_db():
                    "user_id INTEGER PRIMARY KEY, " \
                    "dm_notifications INTEGER DEFAULT 1, " \
                    "mention_notifications INTEGER DEFAULT 1, " \
-                   "compact_mode INTEGER DEFAULT 0)")
+                   "compact_mode INTEGER DEFAULT 0, " \
+                   "theme TEXT DEFAULT 'dark', " \
+                   "presence TEXT DEFAULT 'online')")
     
     connection.commit()
     connection.close()
@@ -307,6 +310,21 @@ def update_user(user_id, **kwargs):
 
     try:
         cursor.execute(query, values)
+        connection.commit()
+        connection.close()
+        return True
+    
+    except Exception as e:
+        connection.close()
+        return False
+    
+def update_presence(user_id, presence):
+    connection = connect_db()
+    cursor = connection.cursor()
+
+    try:
+        cursor.execute("UPDATE users SET presence = ? WHERE id = ?",
+                       (presence, user_id))
         connection.commit()
         connection.close()
         return True
@@ -1012,7 +1030,7 @@ def update_settings(user_id, setting, value):
     connection = connect_db()
     cursor = connection.cursor()
 
-    allowed_settings = ["dm_notifications", "mention_notifications", "compact_mode"]
+    allowed_settings = ["dm_notifications", "mention_notifications", "compact_mode", "theme"]
     if setting not in allowed_settings:
         connection.close()
         return False, "Invalid setting."

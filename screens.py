@@ -2,6 +2,7 @@ import os
 import re
 import io
 import json
+import atexit
 from datetime import datetime
 from PIL import Image as PImage
 
@@ -15,7 +16,7 @@ from textual_image.widget import Image as TImage
 
 import auth
 import db
-from utils import format_timestamp, day_label, should_compact, highlight_mention, get_display_name, get_display_name_markup, get_accent_color
+from utils import format_timestamp, day_label, should_compact, highlight_mention, get_display_name, get_display_name_markup, get_accent_color, get_presence_indicator
 
 
 class LoginScreen(Screen):
@@ -61,6 +62,7 @@ class LoginScreen(Screen):
 
 
 class MainScreen(Screen):
+    BINDINGS = [("ctrl+q", "quit_app", "Quit")]
     def __init__(self):
         super().__init__()
         self.active_server = None
@@ -81,11 +83,14 @@ class MainScreen(Screen):
 
         self.loading_members = False
 
+        self.last_pending_count = None
+
         user = auth.get_current_user()
         settings = db.get_user_settings(user["id"])
         self.dm_notifications = bool(settings.get("dm_notifications", 1))
         self.mention_notifications = bool(settings.get("mention_notifications", 1))
         self.compact_mode = bool(settings.get("compact_mode", 0))
+        self.theme = settings.get("theme", "dark")
 
     def compose(self) -> ComposeResult:
 
@@ -101,7 +106,7 @@ class MainScreen(Screen):
                 pass
 
             with Container(id="user-info"):
-                yield Static("", id ="user-info-avatar")
+                yield Avatar(id ="user-info-avatar")
                 
                 with Container(id="user-info-text"):
                     yield Label("", id="user-info-name")
@@ -114,6 +119,7 @@ class MainScreen(Screen):
         with Container(id="chat-container"):
             yield Label("", id="chat-title")
             with Horizontal(id="dm-navbar"):
+                yield Button("Online", id="dm-tab-online", classes="dm-tab")
                 yield Button("Friends", id="dm-tab-friends", classes="dm-tab active-dm-tab")
                 yield Button("Pending", id="dm-tab-pending", classes="dm-tab")
                 yield Static("", id="dm-navbar-separator")
@@ -134,6 +140,12 @@ class MainScreen(Screen):
         
     async def on_mount(self):
         user = auth.get_current_user()
+
+        def set_offline():
+            db.update_presence(user["id"], "offline")
+
+        atexit.register(set_offline)
+
         await self.refresh_user_info(user)
         accent = get_accent_color(user)
 
@@ -148,17 +160,50 @@ class MainScreen(Screen):
         self.set_interval(1, self.refresh_notifications)
         self.set_interval(1, self.refresh_badges)
         self.set_interval(5, self.refresh_members)
+        self.set_interval(5, self.refresh_dm)
+
+        settings = db.get_user_settings(user["id"])
+        self.apply_theme(settings.get("theme", "dark"))
+
+        db.update_presence(user["id"], "online")
+        self.change_presence("online")
+
+
+    def apply_theme(self, theme):
+        if theme == "light":
+            self.app.add_class("light-mode")
+        else:
+            self.app.remove_class("light-mode")
+
+    
+    async def action_quit_app(self):
+        user = auth.get_current_user()
+        db.update_presence(user["id"], "offline")
+        self.app.exit()
+
+
+    def change_presence(self, presence):
+        avatar = self.query_one("#user-info-avatar", Avatar)
+        for classname in ["status-online", "status-dnd", "status-invisible", "status-offline"]:
+            avatar.remove_class(classname)
+
+        avatar.add_class(f"status-{presence}")
+        avatar.presence = presence
 
 
     async def refresh_user_info(self, user):
         name = get_display_name(user)
         markup_name = get_display_name_markup(user)
         accent = get_accent_color(user)
+        avatar = self.query_one("#user-info-avatar", Avatar)
 
-        self.query_one("#user-info-avatar", Static).update(name[0].upper())
-        self.query_one("#user-info-avatar", Static).set_classes(f"user-info-avatar")
+        avatar.update_label(name[0].upper())
         self.query_one("#user-info-name", Label).update(Text.from_markup(markup_name))
         self.query_one("#user-info-status", Label).update(user.get("status") or f"[dim]@{user['username']}[/dim]")
+
+        settings = db.get_user_settings(user["id"])
+        presence = settings.get("presence", "online")
+        self.change_presence(presence)
 
 
     async def refresh_messages(self):
@@ -208,7 +253,8 @@ class MainScreen(Screen):
 
 
     async def refresh_notifications(self):
-        user = auth.get_current_user()
+        user = db.get_user_by_id(auth.get_current_user()["id"])
+        dnd = user.get("presence") == "dnd"
         
         for server in db.get_user_servers(user["id"]):
             for channel in db.get_server_channels(server["id"]):
@@ -238,7 +284,7 @@ class MainScreen(Screen):
                         lower_mentions.append(mention.lower())
                         
                     if user["username"] in lower_mentions:
-                        if self.mention_notifications == True:
+                        if self.mention_notifications == True and not dnd:
                             self.notify(f"{message["username"]} mentioned you in #{channel["name"]} in {server['name']}", title="Mention", severity="warning")
 
                 self.global_channel_last_ids[channel["id"]] = messages[-1]["id"]
@@ -266,10 +312,20 @@ class MainScreen(Screen):
                 if message["sender_id"] == user["id"]:
                     continue
                 
-                if self.dm_notifications == True:
+                if self.dm_notifications == True and not dnd:
                     self.notify(f"New message from @{message['username']}", title="DM")
 
             self.global_dm_last_ids[f] = messages[-1]["id"]
+
+
+        pending = db.get_pending_friend_requests(user["id"])
+        current_count = len(pending)
+
+        if self.last_pending_count is not None and current_count > self.last_pending_count:
+            if not dnd:
+                self.notify(f"You have {current_count} pending friend requests", title="Friend Requests", severity="warning")
+        
+        self.last_pending_count = current_count
 
     
     async def refresh_badges(self):
@@ -334,6 +390,33 @@ class MainScreen(Screen):
     async def refresh_members(self):
         if self.active_server and not self.search_active:
             await self.load_members(self.active_server["id"])
+
+
+    async def refresh_dm(self):
+        if self.active_mode != "dm":
+            return
+        
+        await self.load_dm_sidebar()
+
+        if self.active_dm_user:
+            self.active_dm_user = db.get_user_by_id(self.active_dm_user["id"])
+            await self.query_one(f"#members-list").remove_children()
+            await self.query_one(f"#members-list").mount(DMUserPanel(self.active_dm_user))
+
+        else:
+            if self.dm_view == "online":
+                await self.load_dm_online_view()
+            
+            elif self.dm_view == "friends":
+                await self.load_dm_friends_view()
+            
+            elif self.dm_view == "pending":
+                await self.load_dm_pending_view()
+
+            for tab in ["dm-tab-online", "dm-tab-friends", "dm-tab-pending"]:
+                self.query_one(f"#{tab}", Button).remove_class("active-dm-tab")
+
+            self.query_one(f"#dm-tab-{self.dm_view}", Button).add_class("active-dm-tab")
 
 
 
@@ -401,7 +484,7 @@ class MainScreen(Screen):
             await members_list.remove_children()
 
             for member in members:
-                name = get_display_name_markup(member)
+                name = f"{get_presence_indicator(member)} {get_display_name_markup(member)}"
 
                 await members_list.mount(Button(Text.from_markup(name), id=f"member-{member['id']}", classes="member-button"))
         
@@ -511,6 +594,7 @@ class MainScreen(Screen):
 
         self.query_one("#dm-tab-friends", Button).add_class("active-dm-tab")
         self.query_one("#dm-tab-pending", Button).remove_class("active-dm-tab")
+        self.query_one("#dm-tab-online", Button).remove_class("active-dm-tab")
 
         await self.query_one("#members-list").remove_children()
         await self.load_dm_friends_view()
@@ -538,7 +622,7 @@ class MainScreen(Screen):
                 else:
                     button_classes = "channel-button"
                 
-                dm_text = Text.from_markup(markup_name)
+                dm_text = Text.from_markup(f"{get_presence_indicator(friend)} {markup_name}")
                 unread = db.get_dm_unread_count(user["id"], friend["id"])
                 if unread > 0 and not (self.active_dm_user and self.active_dm_user["id"] == friend["id"]):
                     button_classes += " dm-unread"
@@ -548,6 +632,31 @@ class MainScreen(Screen):
         
         else:
             await channels_list.mount(Static("No friends yet...", classes="channel-placeholder"))
+
+    async def load_dm_online_view(self):
+        self.dm_view = "online"
+        self.query_one("#input-row").display = False
+        self.query_one("#members-container").display = False
+
+        user = auth.get_current_user()
+        friends = db.get_friends(user["id"])
+
+        online = []
+        for friend in friends:
+            if friend.get("presence", "online") == "online" or friend.get("presence", "online") == "dnd":
+                online.append(friend)
+
+        container = self.query_one("#messages-container")
+        await container.remove_children()
+
+        if not online:
+            await container.mount(Static("No friends online...", classes="chat-placeholder"))
+            return
+
+        await container.mount(Static(f"[bold]Online Friends ({len(online)})[/bold]", markup=True, classes="dm-section-header"))
+
+        for friend in online:
+            await container.mount(FriendCard(friend))
 
     async def load_dm_friends_view(self):
         self.dm_view = "friends"
@@ -915,19 +1024,28 @@ class MainScreen(Screen):
         elif button_id == "dm-button":
             await self.switch_dm_mode()
 
+        elif button_id == "dm-tab-online":
+            self.query_one("#dm-tab-online", Button).add_class("active-dm-tab")
+            self.query_one("#dm-tab-friends", Button).remove_class("active-dm-tab")
+            self.query_one("#dm-tab-pending", Button).remove_class("active-dm-tab")
+            await self.load_dm_online_view()
+
         elif button_id == "dm-tab-friends":
             self.query_one("#dm-tab-friends", Button).add_class("active-dm-tab")
             self.query_one("#dm-tab-pending", Button).remove_class("active-dm-tab")
+            self.query_one("#dm-tab-online", Button).remove_class("active-dm-tab")
             await self.load_dm_friends_view()
 
         elif button_id == "dm-tab-pending":
             self.query_one("#dm-tab-pending", Button).add_class("active-dm-tab")
             self.query_one("#dm-tab-friends", Button).remove_class("active-dm-tab")
+            self.query_one("#dm-tab-online", Button).remove_class("active-dm-tab")
             await self.load_dm_pending_view()
 
         elif button_id.startswith("sidebar-pending-button"):
             self.query_one("#dm-tab-pending", Button).add_class("active-dm-tab")
             self.query_one("#dm-tab-friends", Button).remove_class("active-dm-tab")
+            self.query_one("#dm-tab-online", Button).remove_class("active-dm-tab")
             await self.load_dm_pending_view()
 
         elif button_id == "dm-add-friend":
@@ -976,7 +1094,22 @@ class MainScreen(Screen):
             user = auth.get_current_user()
             self.app.push_screen(SettingsScreen(user, self.dm_notifications, self.mention_notifications, self.compact_mode), self.after_settings_closed)
 
+        elif button_id == "user-info-avatar":
+            user = auth.get_current_user()
+            avatar = self.query_one("#user-info-avatar", Avatar)
+
+            list = {"online": "dnd", "dnd": "invisible", "invisible": "online"}
+            current_presence = getattr(avatar, "presence", "online")
+            new_presence = list.get(current_presence, "online")
+            
+            db.update_presence(user["id"], new_presence)
+            self.change_presence(new_presence)
+            labels = {"online": "Online", "dnd": "Do Not Disturb", "invisible": "Invisible"}
+            self.notify(f"Presence set to {labels[new_presence]}", title="Presence")
+
         elif button_id == "logout-button":
+            user = auth.get_current_user()
+            db.update_presence(user["id"], "offline")
             auth.logout()
             self.app.pop_screen()
 
@@ -1089,17 +1222,30 @@ class MainScreen(Screen):
         self.dm_notifications = result.get("dm_notifications", self.dm_notifications)
         self.mention_notifications = result.get("mention_notifications", self.mention_notifications)
         self.compact_mode = result.get("compact_mode", self.compact_mode)
+        self.theme = result.get("theme", self.theme)
+        self.apply_theme(self.theme)
 
         user = auth.get_current_user()
         db.update_settings(user["id"], "dm_notifications", int(self.dm_notifications))
         db.update_settings(user["id"], "mention_notifications", int(self.mention_notifications))
         db.update_settings(user["id"], "compact_mode", int(self.compact_mode))
-
+        db.update_settings(user["id"], "theme", self.theme)
         new = db.get_user_by_id(user["id"])
         await self.refresh_user_info(new)
 
         self.notify("Settings updated", title="Settings")
 
+
+
+class Avatar(Button):
+    def __init__(self, **kwargs):
+        super().__init__("", **kwargs)
+        self.presence = "online"
+        self.add_class("user-info-avatar")
+        self.add_class("status-online")
+    
+    def update_label(self, letter):
+        self.label = letter.upper()
 
 
 class DaySeparator(Widget):
@@ -1279,7 +1425,7 @@ class UserProfileScreen(ModalScreen):
 
             yield Static("", classes=f"profile-banner accent-{accent}")
             yield Static(name[0].upper(), classes="profile-avatar")
-            yield Label(Text.from_markup(markup_name), classes="profile-name-label")
+            yield Label(Text.from_markup(f"{get_presence_indicator(self.user)} {markup_name}"), classes="profile-name-label")
             yield Label(f"@{self.user['username']}", classes="profile-username-label")
             
             if self.user.get("pronouns"):
@@ -1395,7 +1541,7 @@ class FriendCard(Widget):
         self.add_class("friend-card")
 
     def compose(self) -> ComposeResult:
-        markup_name = get_display_name_markup(self.user)
+        markup_name = f"{get_presence_indicator(self.user)} {get_display_name_markup(self.user)}"
 
         yield Label(Text.from_markup(f"{markup_name} [dim]@{self.user['username']}[/dim]"), classes="friend-card-name")
 
@@ -1465,7 +1611,7 @@ class DMUserPanel(Widget):
 
         yield Static("", classes=f"dm-panel-banner accent-{accent}")
         yield Static(name[0].upper(), classes="dm-panel-avatar")
-        yield Static(Text.from_markup(markup_name), classes="dm-panel-name")
+        yield Static(Text.from_markup(f"{get_presence_indicator(self.user)} {markup_name}"), classes="dm-panel-name")
         yield Static(f"@{self.user['username']}", classes="dm-panel-username")
 
         if self.user.get("pronouns"):
@@ -1633,6 +1779,7 @@ class SettingsScreen(ModalScreen):
         self.dm_notifications = dm_notifications
         self.mention_notifications = mention_notifications
         self.compact_mode = compact_mode
+        self.theme = db.get_user_settings(user["id"]).get("theme", "dark")
 
     def compose(self) -> ComposeResult:
         with Container(id="settings-container"):
@@ -1703,6 +1850,15 @@ class SettingsScreen(ModalScreen):
                 yield Label("APPEARANCE", classes="settings-section-title")
 
                 with Container(classes="settings-space"):
+                    yield Label("THEME", classes="settings-section-label")
+                    
+                    with Horizontal(classes="settings-row"):
+                        with Container(classes="settings-row-text"):
+                            yield Label("Color Theme", classes="settings-row-label")
+                            yield Static("Choose between dark and light mode.", classes="settings-row-description")
+                        yield Button("Dark" if self.theme == "dark" else "Light", id="settings-toggle-theme", classes="settings-toggle" + (" settings-toggle-on" if self.theme == "dark" else ""))
+                
+                with Container(classes="settings-space"):
                     yield Label("CHAT APPEARANCE", classes="settings-section-label")
 
                     with Horizontal(classes="settings-row"):
@@ -1737,7 +1893,7 @@ class SettingsScreen(ModalScreen):
             self.switch_tab("appearance")
         
         elif button_id == "settings-close-button":
-            self.dismiss({"dm_notifications": self.dm_notifications, "mention_notifications": self.mention_notifications, "compact_mode": self.compact_mode})
+            self.dismiss({"dm_notifications": self.dm_notifications, "mention_notifications": self.mention_notifications, "compact_mode": self.compact_mode, "theme": self.theme})
 
         elif button_id and button_id.startswith("member-"):
             user_id = button_id.split("-", 1)[1]
@@ -1816,6 +1972,20 @@ class SettingsScreen(ModalScreen):
                 event.button.add_class("settings-toggle-on")
             else:
                 event.button.label = "Off"
+                event.button.remove_class("settings-toggle-on")
+
+        elif button_id == "settings-toggle-theme":
+            self.theme = "light" if self.theme == "dark" else "dark"
+            if self.theme == "light":
+                self.app.add_class("light-mode")
+            else:
+                self.app.remove_class("light-mode")
+
+            if self.theme == "dark":
+                event.button.label = "Dark"
+                event.button.add_class("settings-toggle-on")
+            else:
+                event.button.label = "Light"
                 event.button.remove_class("settings-toggle-on")
 
     async def after_profile_edit(self, result):

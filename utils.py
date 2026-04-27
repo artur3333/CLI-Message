@@ -102,6 +102,18 @@ def get_accent_color(user):
         color = "dark_blue"
     
     return color
+
+
+def get_presence_indicator(user):
+    presence = user.get("presence", "online")
+    colors = {
+        "online": "green",
+        "dnd": "red",
+        "invisible": "dim",
+        "offline": "dim"
+    }
+    color_chosen = colors.get(presence, "green")
+    return f"[{color_chosen}]●[/{color_chosen}]"
         
 
 
@@ -144,3 +156,10 @@ def highlight_mention(content, username):
         return f"[bold cyan]@{mention}[/bold cyan]"
     
     return re.sub(r"@(\w+)", replace, content.replace("[", "\\["))
+
+
+# def apply_theme(self, theme):
+#     if theme == "light":
+#         self.app.add_class("light-mode")
+#     else:
+#         self.app.remove_class("light-mode")
