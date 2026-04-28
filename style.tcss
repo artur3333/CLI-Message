@@ -56,6 +56,8 @@ MainScreen {
     border-right: solid $primary-darken-3;
     align: center top;
     layout: vertical;
+    overflow-y: auto;
+    scrollbar-size: 0 0;
 }
 
 .server-button {
@@ -116,13 +118,22 @@ MainScreen {
 }
 
 #server-name {
-    height: 100%;
+    height: 3;
     width: 1fr;
+    min-width: 1;
     text-style: bold;
     color: cyan;
     content-align: left middle;
+    text-align: left;
+    border: none;
+    background: transparent;
+    overflow: hidden;
     text-overflow: ellipsis;
     text-wrap: nowrap;
+}
+
+#server-name:hover {
+    color: $primary-darken-2;
 }
 
 .invite-button {
@@ -317,13 +328,35 @@ MainScreen {
 
 #input-row {
     width: 1fr;
-    height: 3;
+    height: auto;
     margin: 0 1 1 1;
+    min-height: 3;
+    max-height: 10;
+    align: left bottom;
 }
 
 #message-input {
     width: 1fr;
-    height: 3;
+    height: auto;
+    min-height: 3;
+    max-height: 10;
+    border: tall $primary-darken-1;
+    background: $panel;
+    padding: 0 1;
+    overflow-y: auto;
+}
+
+#message-input:focus {
+    border: tall cyan;
+}
+
+#message-input .text-area--cursor {
+    color: $text;
+    background: cyan;
+}
+
+#message-input .text-area--placeholder {
+    color: $text-muted;
 }
 
 #attach-button {
@@ -341,10 +374,42 @@ MainScreen {
     color: cyan;
 }
 
+#reply-preview {
+    display: none;
+    width: 100%;
+    height: 3;
+    margin: 0 1 0 1;
+    padding: 0 1;
+    background: $panel;
+    border-left: thick cyan;
+    align: left middle;
+}
+
+#reply-preview-label {
+    width: 1fr;
+    content-align: left middle;
+    color: $text-muted;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-wrap: nowrap;
+}
+
+#reply-preview-cancel {
+    width: 3;
+    height: 1;
+    min-width: 3;
+    border: none;
+    background: transparent;
+    color: $text-muted;
+}
+
+#reply-preview-cancel:hover {
+    color: red;
+}
+
 .message {
     width: 100%;
     height: auto;
-    padding: 0 0 1 0;
     margin-bottom: 0;
     background: transparent;
     padding-left: 1;
@@ -357,6 +422,7 @@ MainScreen {
 
 .compact-message {
     margin-top: 0;
+    padding: 0 0 0 1;
 }
 
 .compact-mode-message {
@@ -366,8 +432,79 @@ MainScreen {
     padding-bottom: 0;
 }
 
+.compact-mode-message .message-head-row {
+    height: auto;
+    align: left top;
+}
+
 .compact-mode {
     padding: 0 1;
+    width: 1fr;
+}
+
+.message-head-row {
+    width: 100%;
+    height: 1;
+    align: left middle;
+}
+
+.message-head {
+    width: 1fr;
+    height: 1;
+}
+
+.message-head-empty {
+    width: 1fr;
+    height: 1;
+}
+
+.message-quote {
+    width: 100%;
+    height: 1;
+    border-left: thick cyan;
+    padding: 0 1;
+    color: $text-muted;
+    background: transparent;
+}
+
+.message-actions {
+    display: block;
+    height: 1;
+    width: auto;
+    align: right middle;
+}
+
+.message-action-button {
+    width: auto;
+    min-width: 7;
+    height: 1;
+    padding: 0 1;
+    border: none;
+    background: transparent;
+    color: $background;
+}
+
+.message-action-button:hover {
+    color: cyan;
+    background: transparent;
+    border: none;
+}
+
+.message-action-button:focus {
+    background: transparent;
+    border: none;
+}
+
+.message:hover .message-action-button {
+    color: $text-muted;
+    background: transparent;
+    border: none;
+}
+
+.compact-mode-message:hover .message-action-button {
+    color: $text-muted;
+    background: transparent;
+    border: none;
 }
 
 .message-header {
@@ -378,6 +515,12 @@ MainScreen {
 .message-content {
     color: $text;
     padding-left: 0;
+    width: 100%;
+}
+
+.message-content.compact-mode {
+    width: 1fr;
+    padding: 0 1;
 }
 
 .attachment-card {
@@ -680,7 +823,8 @@ DownloadScreen,
 UserProfileScreen,
 AddFriendScreen,
 EditProfile,
-SettingsScreen {
+SettingsScreen,
+ServerInfoScreen {
     align: center middle;
     background: rgba(0, 0, 0, 0.4);
 }
@@ -755,6 +899,41 @@ ServerOptionsScreen #screen-container Button {
 
 .hidden {
     display: none;
+}
+
+
+#server-info-icon {
+    width: 9;
+    height: 5;
+    border: round $primary-darken-1;
+    content-align: center middle;
+    text-align: center;
+    text-style: bold;
+    color: white;
+    background: transparent;
+    margin-bottom: 1;
+}
+
+#server-info-name {
+    text-style: bold;
+    text-align: left;
+    color: $text;
+    width: 100%;
+    margin-bottom: 1;
+}
+
+#server-info-description {
+    text-align: left;
+    color: $text-muted;
+    width: 100%;
+    margin-bottom: 1;
+}
+
+#server-info-members {
+    text-align: left;
+    color: $text-muted;
+    width: 100%;
+    margin-bottom: 1;
 }
 
 
@@ -1498,8 +1677,24 @@ App.light-mode #chat-container {
 }
 
 App.light-mode #input-row,
-App.light-mode #attach-button {
+App.light-mode #attach-button,
+App.light-mode #message-input {
     background: #ffffff;
+}
+
+App.light-mode #message-input {
+    background: #ffffff;
+    color: #1a1a1a;
+    border: tall #cccccc;
+}
+
+App.light-mode #message-input:focus {
+    border: tall #0077cc;
+}
+
+App.light-mode #message-input .text-area--cursor {
+    color: #ffffff;
+    background: #0077cc;
 }
 
 App.light-mode #servers-container {
@@ -1718,7 +1913,8 @@ App.light-mode #settings-close-button { color: #888888; }
 App.light-mode .profile-connection-item { color: #0077cc; }
 App.light-mode .profile-avatar,
 App.light-mode .dm-panel-avatar,
-App.light-mode #edit-profile-preview-avatar { color: #1a1a1a; }
+App.light-mode #edit-profile-preview-avatar,
+App.light-mode #server-info-icon { color: #1a1a1a; }
 App.light-mode .profile-edit-button { border: round #aaaaaa; color: #0077cc; }
 App.light-mode #profile-close-button { color: #888888; border: round #aaaaaa; }
 App.light-mode #edit-profile-header { border-bottom: solid #cccccc; }
@@ -1735,4 +1931,44 @@ App.light-mode .dm-panel-profile-button:hover{
 App.light-mode #cancel-button {
     background: #e0e0e0;
     color: #1a1a1a;
+}
+
+App.light-mode .message-action-button {
+    color: #ffffff;
+    background: #ffffff;
+}
+
+App.light-mode .message:hover .message-action-button,
+App.light-mode .compact-mode-message:hover .message-action-button,
+App.light-mode .compact-mode-message:hover .message-action-button {
+    color: #888888;
+    background: transparent;
+}
+
+App.light-mode .message-action-button:hover {
+    color: #0077cc;
+    background: transparent;
+    border: none;
+}
+
+App.light-mode #reply-preview {
+    background: #f0f0f0;
+    border-left: thick #0077cc;
+}
+
+App.light-mode #reply-preview-label {
+    color: #444444;
+}
+
+App.light-mode #reply-preview-cancel {
+    color: #888888;
+}
+
+App.light-mode #reply-preview-cancel:hover {
+    color: #cc0000;
+}
+
+App.light-mode .message-quote {
+    border-left: thick #0077cc;
+    color: #555555;
 }

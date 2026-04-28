@@ -84,6 +84,10 @@ def init_db():
                    "content TEXT NOT NULL, " \
                    "attachment_data BLOB DEFAULT NULL, " \
                    "attachment_name TEXT DEFAULT NULL, " \
+                   "reply_to INTEGER DEFAULT NULL, " \
+                   "edited INTEGER DEFAULT 0, " \
+                   "edit_timestamp INTEGER DEFAULT NULL, " \
+                   "updated_at INTEGER DEFAULT 0, " \
                    "created INTEGER NOT NULL, " \
                    "deleted INTEGER DEFAULT 0)")
     
@@ -104,7 +108,11 @@ def init_db():
                    "content TEXT NOT NULL, " \
                    "attachment_data BLOB DEFAULT NULL, " \
                    "attachment_name TEXT DEFAULT NULL, " \
+                   "reply_to INTEGER DEFAULT NULL, " \
+                   "edited INTEGER DEFAULT 0, " \
+                   "edit_timestamp INTEGER DEFAULT NULL, " \
                    "created INTEGER NOT NULL, " \
+                   "updated_at INTEGER DEFAULT 0, " \
                    "deleted INTEGER DEFAULT 0)")
     
     # channel_reads
@@ -563,13 +571,13 @@ def join_server(user_id, server_id):
         return False, f"Error: {str(e)}"
     
 
-def send_message(channel_id, sender_id, content, attachment_data=None, attachment_name=None):
+def send_message(channel_id, sender_id, content, attachment_data=None, attachment_name=None, reply_to=None):
     connection = connect_db()
     cursor = connection.cursor()
 
     try:
-        cursor.execute("INSERT INTO messages (channel_id, sender_id, content, attachment_data, attachment_name, created) VALUES (?, ?, ?, ?, ?, ?)",
-                       (channel_id, sender_id, content, attachment_data, attachment_name, timestamp()))
+        cursor.execute("INSERT INTO messages (channel_id, sender_id, content, attachment_data, attachment_name, created, updated_at, reply_to) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                       (channel_id, sender_id, content, attachment_data, attachment_name, timestamp(), timestamp(), reply_to))
         message_id = cursor.lastrowid
         connection.commit()
         connection.close()
@@ -585,12 +593,25 @@ def get_channel_messages(channel_id, limit=100):
     connection = connect_db()
     cursor = connection.cursor()
 
-    cursor.execute("SELECT messages.*, users.username, users.display_name, users.name_color FROM messages JOIN users ON messages.sender_id = users.id WHERE messages.channel_id = ? AND messages.deleted = 0 ORDER BY messages.created DESC LIMIT ?",
+    cursor.execute("SELECT messages.*, users.username, users.display_name, users.name_color FROM messages JOIN users ON messages.sender_id = users.id WHERE messages.channel_id = ? AND messages.deleted = 0 ORDER BY messages.created DESC, messages.id DESC LIMIT ?",
                    (channel_id, limit))
     
     results = []
     for row in cursor.fetchall():
-        results.append(dict(row))
+        message = dict(row)
+
+        if message.get("reply_to"):
+            cursor.execute("SELECT messages.*, users.username, users.display_name, users.name_color FROM messages JOIN users ON messages.sender_id = users.id WHERE messages.id = ?",
+                           (message["reply_to"],))
+            reply_row = cursor.fetchone()
+            if reply_row:
+                message["reply"] = dict(reply_row)
+            else:
+                message["reply"] = None
+        else:
+            message["reply"] = None
+
+        results.append(message)    
     connection.close()
 
     results.reverse()
@@ -602,15 +623,118 @@ def get_messages_after(channel_id, last_id):
     connection = connect_db()
     cursor = connection.cursor()
     
-    cursor.execute("SELECT messages.*, users.username, users.display_name, users.name_color FROM messages JOIN users ON messages.sender_id = users.id WHERE messages.channel_id = ? AND messages.id > ? AND messages.deleted = 0 ORDER BY messages.created ASC",
+    cursor.execute("SELECT messages.*, users.username, users.display_name, users.name_color FROM messages JOIN users ON messages.sender_id = users.id WHERE messages.channel_id = ? AND messages.id > ? AND messages.deleted = 0 ORDER BY messages.id ASC",
                     (channel_id, last_id))
     
     results = []
     for row in cursor.fetchall():
-        results.append(dict(row))
+        message = dict(row)
+
+        if message.get("reply_to"):
+            cursor.execute("SELECT messages.*, users.username, users.display_name, users.name_color FROM messages JOIN users ON messages.sender_id = users.id WHERE messages.id = ?",
+                           (message["reply_to"],))
+            reply_row = cursor.fetchone()
+            if reply_row:
+                message["reply"] = dict(reply_row)
+            else:
+                message["reply"] = None
+        else:
+            message["reply"] = None
+
+        results.append(message)
     connection.close()
 
     return results
+
+
+def get_channel_message_updates_after(channel_id, after):
+    connection = connect_db()
+    cursor = connection.cursor()
+    
+    cursor.execute("SELECT messages.*, users.username, users.display_name, users.name_color FROM messages JOIN users ON messages.sender_id = users.id WHERE messages.channel_id = ? AND messages.updated_at > ? ORDER BY messages.updated_at ASC",
+                    (channel_id, after))
+    
+    results = []
+    for row in cursor.fetchall():
+        message = dict(row)
+
+        if message.get("reply_to"):
+            cursor.execute("SELECT messages.*, users.username, users.display_name, users.name_color FROM messages JOIN users ON messages.sender_id = users.id WHERE messages.id = ?",
+                           (message["reply_to"],))
+            reply_row = cursor.fetchone()
+            if reply_row:
+                message["reply"] = dict(reply_row)
+            else:
+                message["reply"] = None
+        else:
+            message["reply"] = None
+
+        results.append(message)
+    connection.close()
+
+    return results
+
+
+def get_message_by_id(message_id):
+    connection = connect_db()
+    cursor = connection.cursor()
+
+    cursor.execute("SELECT messages.*, users.username, users.display_name, users.name_color FROM messages JOIN users ON messages.sender_id = users.id WHERE messages.id = ?",
+                   (message_id,))
+    row = cursor.fetchone()
+    if row is None:
+        connection.close()
+        return None
+    
+    message = dict(row)
+    if message.get("reply_to"):
+        cursor.execute("SELECT messages.*, users.username, users.display_name, users.name_color FROM messages JOIN users ON messages.sender_id = users.id WHERE messages.id = ?",
+                       (message["reply_to"],))
+        reply_row = cursor.fetchone()
+        if reply_row:
+            message["reply"] = dict(reply_row)
+        else:
+            message["reply"] = None
+    else:
+        message["reply"] = None
+
+    connection.close()
+
+    return message
+
+
+def delete_message(message_id, user_id):
+    connection = connect_db()
+    cursor = connection.cursor()
+
+    try:
+        cursor.execute("UPDATE messages SET deleted = 1, updated_at = ? WHERE id = ? AND sender_id = ?",
+                       (timestamp(), message_id, user_id))
+        connection.commit()
+        connection.close()
+
+        return True, "Message deleted."
+    
+    except Exception as e:
+        connection.close()
+        return False, f"Error: {str(e)}"
+    
+
+def edit_message(message_id, user_id, new_content):
+    connection = connect_db()
+    cursor = connection.cursor()
+
+    try:
+        cursor.execute("UPDATE messages SET content = ?, edited = 1, updated_at = ? WHERE id = ? AND sender_id = ?",
+                       (new_content, timestamp(), message_id, user_id))
+        connection.commit()
+        connection.close()
+
+        return True, "Message edited."
+    
+    except Exception as e:
+        connection.close()
+        return False, f"Error: {str(e)}"
 
 
 def search_messages(channel_id, query, limit=20, offset=0):
@@ -787,13 +911,13 @@ def get_friends(user_id):
     return results
 
 
-def send_dm(sender_id, receiver_id, content, attachment_data=None, attachment_name=None):
+def send_dm(sender_id, receiver_id, content, attachment_data=None, attachment_name=None, reply_to=None):
     connection = connect_db()
     cursor = connection.cursor()
 
     try:
-        cursor.execute("INSERT INTO dm_messages (sender_id, receiver_id, content, attachment_data, attachment_name, created) VALUES (?, ?, ?, ?, ?, ?)",
-                       (sender_id, receiver_id, content, attachment_data, attachment_name, timestamp()))
+        cursor.execute("INSERT INTO dm_messages (sender_id, receiver_id, content, attachment_data, attachment_name, reply_to, created, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                       (sender_id, receiver_id, content, attachment_data, attachment_name, reply_to, timestamp(), timestamp()))
         
         message_id = cursor.lastrowid
         connection.commit()
@@ -810,12 +934,25 @@ def get_dm_messages(user_id1, user_id2, limit=100):
     connection = connect_db()
     cursor = connection.cursor()
 
-    cursor.execute("SELECT dm_messages.*, users.username, users.display_name, users.name_color FROM dm_messages JOIN users ON dm_messages.sender_id = users.id WHERE ((dm_messages.sender_id = ? AND dm_messages.receiver_id = ?) OR (dm_messages.sender_id = ? AND dm_messages.receiver_id = ?)) AND dm_messages.deleted = 0 ORDER BY dm_messages.created DESC LIMIT ?",
+    cursor.execute("SELECT dm_messages.*, users.username, users.display_name, users.name_color FROM dm_messages JOIN users ON dm_messages.sender_id = users.id WHERE ((dm_messages.sender_id = ? AND dm_messages.receiver_id = ?) OR (dm_messages.sender_id = ? AND dm_messages.receiver_id = ?)) AND dm_messages.deleted = 0 ORDER BY dm_messages.created DESC, dm_messages.id DESC LIMIT ?",
                    (user_id1, user_id2, user_id2, user_id1, limit))
     
     results = []
     for row in cursor.fetchall():
-        results.append(dict(row))
+        message = dict(row)
+
+        if message.get("reply_to"):
+            cursor.execute("SELECT dm_messages.*, users.username, users.display_name, users.name_color FROM dm_messages JOIN users ON dm_messages.sender_id = users.id WHERE dm_messages.id = ?",
+                           (message["reply_to"],))
+            reply_row = cursor.fetchone()
+            if reply_row:
+                message["reply"] = dict(reply_row)
+            else:
+                message["reply"] = None
+        else:
+            message["reply"] = None
+
+        results.append(message)        
     connection.close()
 
     results.reverse()
@@ -826,15 +963,116 @@ def get_dm_messages_after(user_id1, user_id2, last_id):
     connection = connect_db()
     cursor = connection.cursor()
 
-    cursor.execute("SELECT dm_messages.*, users.username, users.display_name, users.name_color FROM dm_messages JOIN users ON dm_messages.sender_id = users.id WHERE ((dm_messages.sender_id = ? AND dm_messages.receiver_id = ?) OR (dm_messages.sender_id = ? AND dm_messages.receiver_id = ?)) AND dm_messages.id > ? AND dm_messages.deleted = 0 ORDER BY dm_messages.created ASC",
+    cursor.execute("SELECT dm_messages.*, users.username, users.display_name, users.name_color FROM dm_messages JOIN users ON dm_messages.sender_id = users.id WHERE ((dm_messages.sender_id = ? AND dm_messages.receiver_id = ?) OR (dm_messages.sender_id = ? AND dm_messages.receiver_id = ?)) AND dm_messages.id > ? AND dm_messages.deleted = 0 ORDER BY dm_messages.id ASC",
                    (user_id1, user_id2, user_id2, user_id1, last_id))
     
     results = []
     for row in cursor.fetchall():
-        results.append(dict(row))
+        message = dict(row)
+        if message.get("reply_to"):
+            cursor.execute("SELECT dm_messages.*, users.username, users.display_name, users.name_color FROM dm_messages JOIN users ON dm_messages.sender_id = users.id WHERE dm_messages.id = ?",
+                           (message["reply_to"],))
+            reply_row = cursor.fetchone()
+            if reply_row:
+                message["reply"] = dict(reply_row)
+            else:
+                message["reply"] = None
+        else:
+            message["reply"] = None
+        
+        results.append(message)
     connection.close()
 
     return results
+
+
+def get_dm_message_updates_after(user_id1, user_id2, after):
+    connection = connect_db()
+    cursor = connection.cursor()
+
+    cursor.execute("SELECT dm_messages.*, users.username, users.display_name, users.name_color FROM dm_messages JOIN users ON dm_messages.sender_id = users.id WHERE ((dm_messages.sender_id = ? AND dm_messages.receiver_id = ?) OR (dm_messages.sender_id = ? AND dm_messages.receiver_id = ?)) AND dm_messages.updated_at > ? ORDER BY dm_messages.updated_at ASC",
+                   (user_id1, user_id2, user_id2, user_id1, after))
+    
+    results = []
+    for row in cursor.fetchall():
+        message = dict(row)
+        if message.get("reply_to"):
+            cursor.execute("SELECT dm_messages.*, users.username, users.display_name, users.name_color FROM dm_messages JOIN users ON dm_messages.sender_id = users.id WHERE dm_messages.id = ?",
+                           (message["reply_to"],))
+            reply_row = cursor.fetchone()
+            if reply_row:
+                message["reply"] = dict(reply_row)
+            else:
+                message["reply"] = None
+        else:
+            message["reply"] = None
+        
+        results.append(message)
+    connection.close()
+
+    return results
+
+
+def get_dm_message_by_id(message_id):
+    connection = connect_db()
+    cursor = connection.cursor()
+
+    cursor.execute("SELECT dm_messages.*, users.username, users.display_name, users.name_color FROM dm_messages JOIN users ON dm_messages.sender_id = users.id WHERE dm_messages.id = ?",
+                   (message_id,))
+    row = cursor.fetchone()
+    if row is None:
+        connection.close()
+        return None
+    
+    message = dict(row)
+    if message.get("reply_to"):
+        cursor.execute("SELECT dm_messages.*, users.username, users.display_name, users.name_color FROM dm_messages JOIN users ON dm_messages.sender_id = users.id WHERE dm_messages.id = ?",
+                       (message["reply_to"],))
+        reply_row = cursor.fetchone()
+        if reply_row:
+            message["reply"] = dict(reply_row)
+        else:
+            message["reply"] = None
+    else:
+        message["reply"] = None
+
+    connection.close()
+
+    return message
+
+
+def delete_dm_message(message_id, user_id):
+    connection = connect_db()
+    cursor = connection.cursor()
+
+    try:
+        cursor.execute("UPDATE dm_messages SET deleted = 1, updated_at = ? WHERE id = ? AND sender_id = ?",
+                       (timestamp(), message_id, user_id))
+        connection.commit()
+        connection.close()
+
+        return True, "Message deleted."
+    
+    except Exception as e:
+        connection.close()
+        return False, f"Error: {str(e)}"
+    
+
+def edit_dm_message(message_id, user_id, new_content):
+    connection = connect_db()
+    cursor = connection.cursor()
+
+    try:
+        cursor.execute("UPDATE dm_messages SET content = ?, edited = 1, updated_at = ? WHERE id = ? AND sender_id = ?",
+                       (new_content, timestamp(), message_id, user_id))
+        connection.commit()
+        connection.close()
+
+        return True, "Message edited."
+    
+    except Exception as e:
+        connection.close()
+        return False, f"Error: {str(e)}"
 
 
 def mark_channel_read(user_id, channel_id, last_id):
