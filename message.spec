@@ -1,8 +1,9 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+import sys
 from PyInstaller.utils.hooks import collect_submodules
 
-block_cipher = None
+icon_file = "icon.ico" if sys.platform.startswith("win") else None
 
 hiddenimports = (
     collect_submodules("textual")
@@ -49,18 +50,11 @@ a = Analysis(
         "IPython",
         "notebook",
     ],
-    win_no_prefer_redirects=False,
-    win_private_assemblies=False,
-    cipher=block_cipher,
     noarchive=False,
     optimize=0,
 )
 
-pyz = PYZ(
-    a.pure,
-    a.zipped_data,
-    cipher=block_cipher,
-)
+pyz = PYZ(a.pure)
 
 exe = EXE(
     pyz,
@@ -72,7 +66,7 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    upx=False,
     upx_exclude=[],
     runtime_tmpdir=None,
     console=True,
@@ -81,5 +75,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon="icon.ico",
+    icon=icon_file,
 )
