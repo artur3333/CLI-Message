@@ -936,6 +936,45 @@ ServerOptionsScreen #screen-container Button {
     margin-bottom: 1;
 }
 
+#leave-server-button {
+    width: 100%;
+    margin-top: 1;
+    margin-bottom: 1;
+    background: $error-darken-1;
+    color: white;
+    
+}
+
+#leave-server-button:hover {
+    background: $error;
+}
+
+#leave-server-confirmation {
+    width: 100%;
+    height: auto;
+    margin-top: 1;
+    margin-bottom: 1;
+    padding: 1;
+    border: round $error;
+    background: transparent;
+}
+
+#confirm-leave-server-button {
+    width: 1fr;
+    background: $error-darken-1;
+    color: white;
+    border: tall $error;
+}
+
+#confirm-leave-server-button:hover {
+    background: $error;
+}
+
+#cancel-leave-server-button {
+    width: 1fr;
+    margin-left: 1;
+}
+
 
 UserProfileScreen {
     background: rgba(0, 0, 0, 0.2);

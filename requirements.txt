@@ -1,0 +1,4 @@
+Pillow==12.1.0
+rich==14.3.3
+textual==8.2.1
+textual_image==0.12.0

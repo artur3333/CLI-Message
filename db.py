@@ -144,8 +144,7 @@ def init_db():
                    "dm_notifications INTEGER DEFAULT 1, " \
                    "mention_notifications INTEGER DEFAULT 1, " \
                    "compact_mode INTEGER DEFAULT 0, " \
-                   "theme TEXT DEFAULT 'dark', " \
-                   "presence TEXT DEFAULT 'online')")
+                   "theme TEXT DEFAULT 'dark')")
     
     connection.commit()
     connection.close()
@@ -224,10 +223,18 @@ def get_session(token):
 
     cursor.execute("SELECT * FROM sessions WHERE token = ?", (token,))
     row = cursor.fetchone()
-    connection.close()
     if row is None:
+        connection.close()
         return None
     
+    session = dict(row)
+    if session["expires"] <= timestamp():
+        connection.close()
+        delete_session(token)
+        return None
+    
+    connection.close()
+
     return dict(row)
 
 
@@ -246,6 +253,22 @@ def delete_session(token):
         connection.close()
         return False
     
+
+def delete_expired_sessions():
+    connection = connect_db()
+    cursor = connection.cursor()
+
+    try:
+        cursor.execute("DELETE FROM sessions WHERE expires <= ?", (timestamp(),))
+        connection.commit()
+        connection.close()
+
+        return True
+
+    except Exception as e:
+        connection.close()
+        return False
+
 
 def change_user_password(user_id, new_password):
     password_hash, password_salt = hash_password(new_password)
@@ -571,6 +594,23 @@ def join_server(user_id, server_id):
         return False, f"Error: {str(e)}"
     
 
+def leave_server(user_id, server_id):
+    connection = connect_db()
+    cursor = connection.cursor()
+
+    try:
+        cursor.execute("DELETE FROM server_members WHERE server_id = ? AND user_id = ?",
+                        (server_id, user_id))
+        connection.commit()
+        connection.close()
+
+        return True, "Left server"
+    
+    except Exception as e:
+        connection.close()
+        return False, f"Error: {str(e)}"
+    
+
 def send_message(channel_id, sender_id, content, attachment_data=None, attachment_name=None, reply_to=None):
     connection = connect_db()
     cursor = connection.cursor()
@@ -821,13 +861,13 @@ def remove_friend(user_id1, user_id2):
         return False, f"Error: {str(e)}"
     
 
-def accept_friend_request(request_id): #or sender_id / receiver_id
+def accept_friend_request(request_id, receiver_id):
     connection = connect_db()
     cursor = connection.cursor()
 
     try:
-        cursor.execute("UPDATE friends SET status = 'accepted' WHERE id = ?",
-                       (request_id,))
+        cursor.execute("UPDATE friends SET status = 'accepted' WHERE id = ? AND receiver_id = ?",
+                       (request_id, receiver_id))
         connection.commit()
         connection.close()
 
@@ -838,13 +878,13 @@ def accept_friend_request(request_id): #or sender_id / receiver_id
         return False, f"Error: {str(e)}"
     
 
-def decline_friend_request(request_id):
+def decline_friend_request(request_id, receiver_id):
     connection = connect_db()
     cursor = connection.cursor()
 
     try:
-        cursor.execute("DELETE FROM friends WHERE id = ?",
-                       (request_id,))
+        cursor.execute("DELETE FROM friends WHERE id = ? AND receiver_id = ?",
+                       (request_id, receiver_id))
         connection.commit()
         connection.close()
 

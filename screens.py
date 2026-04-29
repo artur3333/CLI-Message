@@ -153,6 +153,8 @@ class MainScreen(Screen):
 
         def set_offline():
             db.update_presence(user["id"], "offline")
+            auth.logout()
+            # auth.clear_session_state()
 
         atexit.register(set_offline)
 
@@ -211,8 +213,8 @@ class MainScreen(Screen):
         self.query_one("#user-info-name", Label).update(Text.from_markup(markup_name))
         self.query_one("#user-info-status", Label).update(user.get("status") or f"[dim]@{user['username']}[/dim]")
 
-        settings = db.get_user_settings(user["id"])
-        presence = settings.get("presence", "online")
+        userr = db.get_user_by_id(user["id"])
+        presence = userr.get("presence", "offline")
         self.change_presence(presence)
 
 
@@ -372,7 +374,7 @@ class MainScreen(Screen):
                         
                     if user["username"] in lower_mentions:
                         if self.mention_notifications == True and not dnd:
-                            self.notify(f"{message["username"]} mentioned you in #{channel["name"]} in {server['name']}", title="Mention", severity="warning")
+                            self.notify(f"{message['username']} mentioned you in #{channel['name']} in {server['name']}", title="Mention", severity="warning")
 
                 self.global_channel_last_ids[channel["id"]] = messages[-1]["id"]
 
@@ -597,7 +599,7 @@ class MainScreen(Screen):
             self.last_message_day = None
 
             channel = self.active_channel
-            await messages_container.mount(Static(f"This is the beginning of # {channel["name"]}", classes="channel-start-placeholder"))
+            await messages_container.mount(Static(f"This is the beginning of # {channel['name']}", classes="channel-start-placeholder"))
 
             prev = None
             prev_day = None
@@ -680,7 +682,7 @@ class MainScreen(Screen):
             self.loading_messages = False
 
 
-    async def switch_dm_mode(self): #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    async def switch_dm_mode(self): #! Switch DM mode
         self.active_server = None
         self.active_channel = None
         self.last_message_id = 0
@@ -867,7 +869,7 @@ class MainScreen(Screen):
         await self.load_dm_sidebar()
 
     
-    async def switch_server(self, server_id): #! Check thisssssssssssss!!!!
+    async def switch_server(self, server_id): #! Swich server
         server = db.get_server_by_id(server_id)
         self.active_server = server
         self.active_channel = None
@@ -983,7 +985,7 @@ class MainScreen(Screen):
             
             except Exception as e:
                 self.notify(f"Failed to read attachment: {str(e)}", title="Error")
-                pass
+                return
 
         if self.active_mode == "dm":
             if not self.active_dm_user:
@@ -1316,7 +1318,8 @@ class MainScreen(Screen):
 
         elif button_id.startswith("accept-"):
             request = button_id.split("-", 1)[1]
-            success, result = db.accept_friend_request(request)
+            user = auth.get_current_user()
+            success, result = db.accept_friend_request(request, user["id"])
             if success:
                 await self.load_dm_sidebar()
                 await self.load_dm_pending_view()
@@ -1325,7 +1328,8 @@ class MainScreen(Screen):
 
         elif button_id.startswith("decline-"):
             request = button_id.split("-", 1)[1]
-            success, result = db.decline_friend_request(request)
+            user = auth.get_current_user()
+            success, result = db.decline_friend_request(request, user["id"])
             if success:
                 await self.load_dm_sidebar()
                 await self.load_dm_pending_view()
@@ -1370,7 +1374,7 @@ class MainScreen(Screen):
             user = auth.get_current_user()
             db.update_presence(user["id"], "offline")
             auth.logout()
-            self.app.pop_screen()
+            self.app.switch_screen("login")
 
     
     async def on_input_submitted(self, event: Input.Submitted):
@@ -1451,15 +1455,6 @@ class MainScreen(Screen):
             await self.query_one("#members-list").remove_children()
             await self.query_one("#members-list").mount(DMUserPanel(self.active_dm_user))
         
-        
-
-        #! later maybe
-        # query = event.value.strip()
-        # if self.active_mode == "server" and self.active_server:
-        #     if not query:
-        #         self.search_active = False
-        #         await self.load_members(self.active_server["id"])
-
 
     
     async def server_created(self, server_id):
@@ -1536,7 +1531,7 @@ class MainScreen(Screen):
 
         self.notify("Settings updated", title="Settings")
 
-    async def after_server_info(self, result): #!LATER
+    async def after_server_info(self, result):
         if result == "left":
             self.notify("You left the server.", title="Server")
             await self.switch_dm_mode()
@@ -1584,7 +1579,7 @@ class MessageInput(TextArea):
 
             return
         
-        super()._on_key(event)
+        await super()._on_key(event)
 
 
 class Message(Widget):
@@ -2265,7 +2260,7 @@ class SettingsScreen(ModalScreen):
             
             self.active_tab = tab
     
-    def on_button_pressed(self, event: Button.Pressed):
+    async def on_button_pressed(self, event: Button.Pressed):
         button_id = event.button.id
 
         if button_id == "settings-navigation-account":
@@ -2291,7 +2286,7 @@ class SettingsScreen(ModalScreen):
             if success:
                 self.query_one("#settings-username-error", Label).update("")
                 self.query_one("#settings-username-error", Label).add_class("hidden")
-                self.after_username_edit(True)
+                await self.after_username_edit(True)
 
             else:
                 error.update(result)
@@ -2407,10 +2402,41 @@ class ServerInfoScreen(ModalScreen):
             yield Label(self.server["name"], id="server-info-name")
             yield Label(description, id="server-info-description")
             yield Label(f"Members: {members}", id="server-info-members")
+
+            if self.server.get("owner_id") == auth.get_current_user()["id"]:
+                yield Static("[dim]You are the owner :)[/dim]", markup=True, id="screen-subtitle")
+            else:
+                yield Button("Leave Server", id="leave-server-button", variant="error")
+
+                with Container(id="leave-server-confirmation", classes="hidden"):
+                    yield Label("Are you sure you want to leave this server?", classes="screen-subtitle")
+
+                    with Horizontal(id="screen-buttons"):
+                        yield Button("Confirm", id="confirm-leave-server-button", variant="error")
+                        yield Button("Cancel", id="cancel-leave-server-button")
+            
             yield Button("Close", id="close-button", variant="primary")
         
     def on_button_pressed(self, event: Button.Pressed):
-        self.dismiss()
+        button_id = event.button.id
+        
+        if button_id == "leave-server-button":
+            self.query_one("#leave-server-confirmation", Container).remove_class("hidden")
+        
+        elif button_id == "confirm-leave-server-button":
+            current_user = auth.get_current_user()
+            
+            success, result = db.leave_server(current_user["id"], self.server["id"])
+            if success:
+                self.dismiss("left")
+            else:
+                return
+            
+        elif button_id == "cancel-leave-server-button":
+            self.query_one("#leave-server-confirmation", Container).add_class("hidden")
+
+        else:
+            self.dismiss()
 
 
 
