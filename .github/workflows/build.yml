@@ -180,7 +180,35 @@ jobs:
           cat > AppDir/AppRun <<'EOF'
           #!/usr/bin/env bash
           HERE="$(dirname "$(readlink -f "$0")")"
-          exec "$HERE/usr/bin/CLI-Message" "$@"
+          APP="$HERE/usr/bin/CLI-Message"
+
+          if [ -t 0 ] || [ -t 1 ]; then
+            exec "$APP" "$@"
+          fi
+
+          if command -v xdg-terminal-exec >/dev/null 2>&1; then
+            exec xdg-terminal-exec "$APP" "$@"
+          fi
+
+          if command -v gnome-terminal >/dev/null 2>&1; then
+            exec gnome-terminal -- "$APP" "$@"
+          elif command -v konsole >/dev/null 2>&1; then
+            exec konsole -e "$APP" "$@"
+          elif command -v xfce4-terminal >/dev/null 2>&1; then
+            exec xfce4-terminal -e "$APP" "$@"
+          elif command -v kitty >/dev/null 2>&1; then
+            exec kitty "$APP" "$@"
+          elif command -v alacritty >/dev/null 2>&1; then
+            exec alacritty -e "$APP" "$@"
+          elif command -v foot >/dev/null 2>&1; then
+            exec foot "$APP" "$@"
+          elif command -v wezterm >/dev/null 2>&1; then
+            exec wezterm start -- "$APP" "$@"
+          elif command -v xterm >/dev/null 2>&1; then
+            exec xterm -e "$APP" "$@"
+          fi
+
+          exec "$APP" "$@"
           EOF
 
           chmod +x AppDir/AppRun
